@@ -1,0 +1,9 @@
+# Script output and pre-change snapshots contain real tenant data
+# (names, email addresses). Never commit them.
+*.csv
+before.txt
+email-address-policies.txt
+
+# Pester output
+testResults.xml
+coverage.xml

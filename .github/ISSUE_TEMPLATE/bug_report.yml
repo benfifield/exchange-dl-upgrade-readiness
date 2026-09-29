@@ -1,0 +1,59 @@
+name: Bug report
+description: The script errored, or reported a blocker incorrectly.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Redact tenant data before posting.** Issues are public. Replace real
+        names, email addresses, domains, GUIDs and distinguished names with
+        placeholders such as `user1@contoso.com`.
+
+  - type: checkboxes
+    id: redacted
+    attributes:
+      label: Redaction
+      options:
+        - label: I removed or replaced all real tenant names, addresses, domains and GUIDs below.
+          required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what did the script do instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Script output (redacted)
+      description: The console report, and any error text.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: ps-version
+    attributes:
+      label: PowerShell version
+      description: Output of `$PSVersionTable.PSVersion`
+      placeholder: "7.5.2"
+    validations:
+      required: true
+
+  - type: input
+    id: exo-version
+    attributes:
+      label: ExchangeOnlineManagement version
+      description: Output of `(Get-Module ExchangeOnlineManagement -ListAvailable).Version`
+      placeholder: "3.9.2"
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else?
+      description: For example, the list's RecipientTypeDetails, whether it's synced from on-premises, or what Microsoft support said.

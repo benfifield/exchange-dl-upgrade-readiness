@@ -1,11 +1,19 @@
 # Test-DLUpgradeReadiness
 
+[![Tests](../../actions/workflows/test.yml/badge.svg)](../../actions/workflows/test.yml)
+
 Explains **why** a distribution list (DL) can't be upgraded to a Microsoft 365
 group. The script checks one DL against every blocker in Microsoft KB 4481100,
 [Can't upgrade distribution lists to Microsoft 365 Groups](https://learn.microsoft.com/troubleshoot/exchange/groups-and-distribution-lists/cannot-upgrade-distribution-lists-to-office-365-groups),
 and names the members, groups, mailboxes or policies causing each blocker.
 
-The script is read-only. It changes nothing in the tenant.
+The script is read-only. It changes nothing in the tenant. See
+[SECURITY.md](SECURITY.md) for details.
+
+> **Not affiliated with Microsoft.** This is an independent tool, not endorsed
+> or supported by Microsoft. The checks follow KB 4481100 as of April 2025.
+> Microsoft's article is the source of truth, and Microsoft can change the
+> upgrade rules at any time.
 
 ## Requirements
 
@@ -39,6 +47,11 @@ Each object has `Check`, `Status` (`Pass`, `Blocked`, `Warning`, `Error`,
 `Info`, `NotApplicable`), `Detail`, `Items` (the offending objects),
 `Resolution` (a one-line fix) and `Guide` (the RESOLVING.md section).
 `Resolution` and `Guide` are empty for results that need no fix.
+
+The output contains real names, email addresses and group memberships from
+your tenant. Redact it before sharing it publicly, including in issues on this
+repository. The repo's `.gitignore` excludes `*.csv` so exported reports aren't
+committed by accident.
 
 ## Sample output
 
