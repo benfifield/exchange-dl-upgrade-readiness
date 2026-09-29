@@ -422,6 +422,7 @@ function Write-CheckReport {
 
 # --- Main (skipped when dot-sourced, e.g. by the Pester tests) ---
 if ($MyInvocation.InvocationName -ne '.') {
+    # Checked at runtime, not with #Requires, so tests can dot-source without the module.
     if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) {
         throw 'The ExchangeOnlineManagement module is required. Install it with: Install-Module ExchangeOnlineManagement -Scope CurrentUser'
     }

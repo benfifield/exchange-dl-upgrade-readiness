@@ -12,6 +12,17 @@ Bug reports and fixes are welcome.
   page that supports it.
 - **Keep the script read-only.** It must never change a tenant. Commands that
   change things belong in RESOLVING.md, with their side effects described.
+- **Exchange Online only.** The script depends on one module
+  (`ExchangeOnlineManagement`) and one sign-in. Don't add a Microsoft Graph or
+  other module dependency.
+- **Verify property names against Microsoft's docs.** Before the script or a
+  test mock reads a property of an Exchange object, confirm the cmdlet actually
+  returns it. The script runs under `Set-StrictMode`, so a missing property
+  throws. Mocks must mirror real object shapes, or tests pass while the script
+  fails against a real tenant.
+- **Don't add `#Requires -Modules ExchangeOnlineManagement`.** The tests and
+  CI dot-source the script without that module installed. The script checks for
+  the module at runtime instead.
 
 ## Making a change
 

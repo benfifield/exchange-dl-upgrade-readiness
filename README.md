@@ -97,7 +97,7 @@ clear.
 | Nested: member of other groups | The group is a member of another group. | [Member of other groups](RESOLVING.md#member-of-other-groups) |
 | Shared mailbox forwarding | A shared mailbox forwards to the group. | [Shared mailbox forwarding](RESOLVING.md#shared-mailbox-forwarding) |
 | Sender restriction in other DLs | Another DL accepts mail only from this group's members. | [Sender restriction](RESOLVING.md#sender-restriction) |
-| Alias characters | The alias contains characters other than letters, digits, `.`, `-` and `_`. | [Alias special characters](RESOLVING.md#alias-special-characters) |
+| Alias characters | The alias contains characters other than letters, digits, `.`, `-` and `_`. Microsoft's article says only "special characters" without listing them, so this allowed set is an inference and may be stricter or looser than Microsoft's actual rule. | [Alias special characters](RESOLVING.md#alias-special-characters) |
 | Tenant: group email address policy | A custom email address policy targets Microsoft 365 groups. This check covers the whole tenant and blocks every DL. | [Email address policy](RESOLVING.md#email-address-policy) |
 | Microsoft eligibility check | Not a blocker. It compares the result with `Get-EligibleDistributionGroupForMigration` and warns when the two disagree. For example, Microsoft may report the DL ineligible with no documented blocker found. | [Undocumented block](RESOLVING.md#undocumented-block) |
 
