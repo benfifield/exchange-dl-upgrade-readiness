@@ -12,14 +12,22 @@
     The script is read-only. It signs in to Exchange Online interactively if no
     session is already open, and disconnects only a session it opened itself.
 
-    Result objects are written to the pipeline, so the report can be exported:
+    A bare run shows only the report. Result objects are written to the
+    pipeline when the output is piped, or always with -PassThru:
         .\Test-DLUpgradeReadiness.ps1 sales@contoso.com | Export-Csv report.csv
 
 .PARAMETER Identity
     The distribution list to evaluate: email address, alias, name or GUID.
 
+.PARAMETER PassThru
+    Always write result objects to the pipeline, e.g. when assigning the output
+    to a variable. Piped output does not need this switch.
+
 .EXAMPLE
     .\Test-DLUpgradeReadiness.ps1 -Identity sales@contoso.com
+
+.EXAMPLE
+    $r = .\Test-DLUpgradeReadiness.ps1 -Identity sales@contoso.com -PassThru
 
 .LINK
     https://learn.microsoft.com/troubleshoot/exchange/groups-and-distribution-lists/cannot-upgrade-distribution-lists-to-office-365-groups
@@ -28,7 +36,9 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory, Position = 0)]
-    [string]$Identity
+    [string]$Identity,
+
+    [switch]$PassThru
 )
 
 Set-StrictMode -Version Latest
@@ -437,7 +447,10 @@ if ($MyInvocation.InvocationName -ne '.') {
         $recipient = Get-Recipient -Identity $Identity -ErrorAction Stop
         $results = @(Get-DLUpgradeReadiness -Identity $recipient.Guid.ToString())
         Write-CheckReport -Recipient $recipient -Results $results
-        $results
+        # Emit objects only when a caller consumes them; a bare run shows just the report.
+        if ($PassThru -or $MyInvocation.PipelinePosition -lt $MyInvocation.PipelineLength) {
+            $results
+        }
     }
     finally {
         if ($openedSession) { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue }

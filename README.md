@@ -35,11 +35,13 @@ The script is read-only. It changes nothing in the tenant. See
 session is open, an interactive sign-in window appears. A session the script
 opened is disconnected when it finishes; an existing session is left open.
 
-Result objects are also written to the pipeline:
+A bare run shows only the report. Result objects are written to the pipeline
+when the output is piped, or always with `-PassThru` (needed when assigning the
+output to a variable):
 
 ```powershell
 .\Test-DLUpgradeReadiness.ps1 sales@contoso.com | Export-Csv sales-report.csv -NoTypeInformation
-$r = .\Test-DLUpgradeReadiness.ps1 sales@contoso.com
+$r = .\Test-DLUpgradeReadiness.ps1 sales@contoso.com -PassThru
 $r | Where-Object Status -eq 'Blocked'
 ```
 

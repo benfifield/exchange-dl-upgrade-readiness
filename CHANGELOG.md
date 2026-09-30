@@ -4,6 +4,12 @@ Notable changes to this project. Versions follow
 [Semantic Versioning](https://semver.org/). Each release is tagged `vX.Y.Z`
 and published on the repository's Releases page.
 
+## 1.1.0 - 2026-09-30
+
+- A bare run no longer prints result objects below the report. Objects are
+  written to the pipeline when the output is piped, or always with the new
+  `-PassThru` switch (needed for `$r = ...`).
+
 ## 1.0.0 - 2026-09-29
 
 First release.
