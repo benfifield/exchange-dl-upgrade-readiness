@@ -217,6 +217,29 @@ Describe 'Test-GroupEmailAddressPolicy' {
         Mock Get-EmailAddressPolicy { }
         (Test-GroupEmailAddressPolicy).Status | Should -Be 'Pass'
     }
+    # Every tenant has the built-in legacy 'Default Policy' at priority Lowest.
+    It 'ignores the built-in Default Policy' {
+        Mock Get-EmailAddressPolicy { @(
+            [pscustomobject]@{ Name = 'Default Policy'; Priority = 'Lowest'; EnabledPrimarySMTPAddressTemplate = '@contoso.onmicrosoft.com' }
+        ) }
+        (Test-GroupEmailAddressPolicy).Status | Should -Be 'Pass'
+    }
+    It 'blocks on a custom policy alongside the Default Policy and lists only the custom one' {
+        Mock Get-EmailAddressPolicy { @(
+            [pscustomobject]@{ Name = 'Groups'; Priority = 1; EnabledPrimarySMTPAddressTemplate = '@groups.contoso.com' }
+            [pscustomobject]@{ Name = 'Default Policy'; Priority = 'Lowest'; EnabledPrimarySMTPAddressTemplate = '@contoso.onmicrosoft.com' }
+        ) }
+        $r = Test-GroupEmailAddressPolicy
+        $r.Status | Should -Be 'Blocked'
+        $r.Items | Should -HaveCount 1
+        $r.Items[0] | Should -Match 'Groups'
+    }
+    It 'blocks on a custom policy named Default Policy' {
+        Mock Get-EmailAddressPolicy { @(
+            [pscustomobject]@{ Name = 'Default Policy'; Priority = 1; EnabledPrimarySMTPAddressTemplate = '@groups.contoso.com' }
+        ) }
+        (Test-GroupEmailAddressPolicy).Status | Should -Be 'Blocked'
+    }
 }
 
 Describe 'Test-MicrosoftEligibility' {
@@ -270,7 +293,7 @@ Describe 'Resolution guidance' {
         $other = [pscustomobject]@{ DisplayName = 'Other'; PrimarySmtpAddress = 'other@contoso.com'; Guid = [guid]::NewGuid() }
         Mock Get-DistributionGroup { $other }
         Mock Get-Mailbox { $other }
-        Mock Get-EmailAddressPolicy { [pscustomobject]@{ Name = 'Groups' } }
+        Mock Get-EmailAddressPolicy { [pscustomobject]@{ Name = 'Groups'; Priority = 1 } }
         $blocked = @(
             'MailUniversalSecurityGroup', 'DynamicDistributionGroup', 'RoomList', 'UserMailbox' |
                 ForEach-Object { Test-GroupType -RecipientTypeDetails $_ }
