@@ -311,9 +311,13 @@ function Test-AliasCharacter {
 }
 
 function Test-GroupEmailAddressPolicy {
-    # In Exchange Online, email address policies exist only for Microsoft 365
-    # groups, so any policy returned is a custom groups policy.
-    $policies = @(Get-EmailAddressPolicy -ErrorAction Stop | Where-Object { $_ })
+    # In Exchange Online, new email address policies apply only to Microsoft 365
+    # groups. Every tenant also has the built-in legacy 'Default Policy' at
+    # priority Lowest, which doesn't block upgrades and can't be removed. Custom
+    # policies always get a numeric priority, so both conditions must match.
+    $policies = @(Get-EmailAddressPolicy -ErrorAction Stop | Where-Object {
+            $_ -and -not ("$($_.Priority)" -eq 'Lowest' -and $_.Name -eq 'Default Policy')
+        })
     if ($policies.Count) {
         New-Blocker 'Tenant: group email address policy' `
             'TENANT-WIDE: a custom email address policy applies to Microsoft 365 groups. This blocks every DL upgrade; remove the policy.' 'Email address policy' `

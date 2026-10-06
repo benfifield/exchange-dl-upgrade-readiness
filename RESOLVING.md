@@ -301,6 +301,11 @@ must not already be used by another recipient.
 groups. While it exists, **no** distribution list in the tenant can be
 upgraded.
 
+The built-in `Default Policy` (priority `Lowest`) exists in every tenant and
+isn't a blocker, so the script ignores it. Don't remove or change it. Custom
+policies always have a numeric priority
+([Set-EmailAddressPolicy](https://learn.microsoft.com/powershell/module/exchange/set-emailaddresspolicy#-priority)).
+
 **Fix:** Record the policy's settings, remove the policy, upgrade your lists,
 then recreate the policy if you still need it.
 

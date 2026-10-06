@@ -4,6 +4,12 @@ Notable changes to this project. Versions follow
 [Semantic Versioning](https://semver.org/). Each release is tagged `vX.Y.Z`
 and published on the repository's Releases page.
 
+## Unreleased
+
+- The email address policy check no longer flags the built-in
+  `Default Policy` (priority `Lowest`), which every tenant has. Previously
+  every tenant was reported as blocked.
+
 ## 1.1.0 - 2026-09-30
 
 - A bare run no longer prints result objects below the report. Objects are
