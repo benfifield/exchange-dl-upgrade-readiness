@@ -338,3 +338,74 @@ says the list isn't eligible, but none of the documented blockers apply.
 2. Wait an hour and re-run the script. Recent changes may not have replicated.
 3. Open a Microsoft support case. Include the script's output, which shows
    every documented condition was checked.
+
+## Upgrade fails even though every check passes
+
+**Symptom:** The script reports no blockers and Microsoft's eligibility check
+says the list is eligible, but the upgrade never completes. Either:
+
+- the owner selects the button in the upgrade email and the card says
+  "Upgrade process failed", or
+- `Upgrade-DistributionGroup` reports that the request was submitted.
+  `WhenChanged` updates to the time of the attempt, but
+  `MigrationToUnifiedGroupInProgress` stays `False` and the list stays a
+  distribution list.
+
+No error appears in PowerShell or in the unified audit log.
+
+**Why:** Unknown. Microsoft doesn't document this failure. The upgrade runs as
+a background job in Microsoft's service, which doesn't report its errors to
+admins. Others have seen it on simple cloud lists too
+([Office 365 for IT Pros](https://office365itpros.com/2024/10/14/upgrade-distribution-lists-failure/)).
+The script can only check for documented causes, so it can't detect this.
+
+**Fix:** Work out whether the problem is the list or the tenant, then involve
+Microsoft. Upgrades can't be undone, so test only with lists you're willing to
+convert.
+
+**1. Confirm the upgrade failed.** Upgrades normally finish in 5 to 10
+minutes. Wait at least an hour, then check:
+
+```powershell
+Get-DistributionGroup '<DL>' | Format-List MigrationToUnifiedGroupInProgress, WhenChanged
+Get-Recipient '<DL>' | Format-List RecipientTypeDetails
+```
+
+`GroupMailbox` means the upgrade finished. `MigrationToUnifiedGroupInProgress`
+of `True` means it's still running.
+
+**2. Retry as an admin.** If the owner's approval failed, have an admin with
+the Exchange Administrator role run the upgrade. This shows whether the
+problem is limited to the owner's approval step.
+
+```powershell
+Upgrade-DistributionGroup -DlIdentities '<DL email address>'
+```
+
+**3. Test with a new list.** Create a simple list with one owner and one
+member, upgrade it, and check it after an hour as in step 1.
+
+```powershell
+New-DistributionGroup -Name '<test name>' -Alias '<test alias>' -ManagedBy '<owner>' -Members '<member>'
+Upgrade-DistributionGroup -DlIdentities '<test alias>@<domain>'
+```
+
+- If the new list upgrades, the problem is specific to the original list.
+  Recreating it is usually quicker than a support case. Remove the original
+  list's email addresses before adding them to the new one.
+- If the new list also fails, something in the tenant blocks every upgrade.
+  Go to step 4.
+
+**4. Open a Microsoft support case.** Only Microsoft's service-side logs show
+the real error. Include:
+
+- each list's primary SMTP address, GUID and `ExternalDirectoryObjectId`
+- the date, time and time zone of each attempt, and who started it (owner
+  email or admin PowerShell)
+- the output of `Get-EligibleDistributionGroupForMigration` for each list,
+  showing they're eligible
+- this script's output for each list, showing no documented blocker applies
+- the tenant settings you've ruled out, such as email address policies,
+  group naming policy and who can create Microsoft 365 groups
+
+Ask Microsoft for the error logged by the upgrade job for each attempt.

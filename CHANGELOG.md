@@ -9,6 +9,8 @@ and published on the repository's Releases page.
 - The email address policy check no longer flags the built-in
   `Default Policy` (priority `Lowest`), which every tenant has. Previously
   every tenant was reported as blocked.
+- RESOLVING.md has a new section, "Upgrade fails even though every check
+  passes", for upgrades that Microsoft accepts but never completes.
 
 ## 1.1.0 - 2026-09-30
 

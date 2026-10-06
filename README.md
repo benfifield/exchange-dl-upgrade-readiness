@@ -86,6 +86,10 @@ Each `BLOCKED` line shows a one-line `Fix:` and the section of
 watch for. RESOLVING.md also explains how to run the upgrade once the list is
 clear.
 
+A clean report doesn't guarantee the upgrade will succeed. Microsoft's upgrade
+job can fail without reporting an error. If that happens, see
+[Upgrade fails even though every check passes](RESOLVING.md#upgrade-fails-even-though-every-check-passes).
+
 ## Checks
 
 | Check | Blocked when | How to fix |
