@@ -11,6 +11,20 @@ and published on the repository's Releases page.
   every tenant was reported as blocked.
 - RESOLVING.md has a new section, "Upgrade fails even though every check
   passes", for upgrades that Microsoft accepts but never completes.
+- The script now requires ExchangeOnlineManagement 3.0.0 or later and says
+  so up front, instead of failing later on `Get-ConnectionInformation`.
+- Documentation fixes for the public release:
+    - The Exchange admin center upgrade steps now match Microsoft's
+      owner-approval flow (**Send upgrade request**), and note that an
+      upgrade can't be undone.
+    - README requirements link to Microsoft's setup docs, including execution
+      policy and unblocking downloaded scripts.
+    - RESOLVING.md lists the roles and sync client versions that group source
+      of authority conversion needs.
+    - Sender restriction steps add a replacement before removing the list, so
+      the other list is never left open to anyone.
+    - The email address policy steps record and restore the whole policy,
+      including `ManagedByFilter`.
 
 ## 1.1.0 - 2026-09-30
 
