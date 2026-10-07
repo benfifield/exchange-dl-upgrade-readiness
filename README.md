@@ -144,3 +144,26 @@ which also explains how to run the tests.
 ## License
 
 [MIT](LICENSE)
+
+## AI use
+
+This project was built with help from
+[Claude Code](https://claude.com/claude-code), an AI coding assistant. AI
+drafted much of the script, tests and documentation. I directed the work,
+reviewed every change, and tested the script against a real Microsoft 365
+tenant.
+
+## Acknowledgements
+
+I created this tool while working at
+[HOPE International](https://www.hopeinternational.org/), which invests in
+the dreams of families in the world's underserved communities as we proclaim
+and live out the Gospel. We do this through Christ-centered microfinance: 
+business loans, savings groups, and community support. Thank you to HOPE for 
+allowing me to contribute it to the community.
+
+HOPE doesn't provide support for this tool. Please report problems through
+this repository's [issues](../../issues), not to HOPE staff.
+
+If this tool helped you and you'd like to give back, please consider
+[donating to HOPE](https://www.hopeinternational.org/donate).
