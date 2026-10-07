@@ -437,10 +437,11 @@ function Write-CheckReport {
 # --- Main (skipped when dot-sourced, e.g. by the Pester tests) ---
 if ($MyInvocation.InvocationName -ne '.') {
     # Checked at runtime, not with #Requires, so tests can dot-source without the module.
-    if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) {
-        throw 'The ExchangeOnlineManagement module is required. Install it with: Install-Module ExchangeOnlineManagement -Scope CurrentUser'
+    # 3.0.0 is the first version with Get-ConnectionInformation.
+    if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement | Where-Object Version -GE '3.0.0')) {
+        throw 'ExchangeOnlineManagement 3.0.0 or later is required. See https://learn.microsoft.com/powershell/exchange/exchange-online-powershell-v2#install-and-update-the-exchange-online-powershell-module'
     }
-    Import-Module ExchangeOnlineManagement -ErrorAction Stop
+    Import-Module ExchangeOnlineManagement -MinimumVersion 3.0.0 -ErrorAction Stop
 
     $openedSession = $false
     if (-not @(Get-ConnectionInformation -ErrorAction SilentlyContinue | Where-Object State -EQ 'Connected').Count) {

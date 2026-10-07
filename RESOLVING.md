@@ -6,8 +6,9 @@ the section names below match.
 
 ## Before you start
 
-- Run every command in Exchange Online PowerShell (`Connect-ExchangeOnline`)
-  unless the section says otherwise.
+- Run every command in Exchange Online PowerShell unless the section says
+  otherwise. See
+  [Connect to Exchange Online PowerShell](https://learn.microsoft.com/powershell/exchange/connect-to-exchange-online-powershell).
 - Replace each `<placeholder>` with a name, alias, email address or GUID. The
   script's output lists the exact objects involved.
 - Record the current state before changing it. Several fixes remove settings
@@ -22,36 +23,68 @@ the section names below match.
 
 ## Upgrading once the list is clear
 
-In the Exchange admin center, go to **Recipients > Groups > Distribution
-list**, select the list, and choose **Upgrade to Microsoft 365 group**. Or,
-in PowerShell:
+**An upgrade can't be undone.** The new Microsoft 365 group keeps the list's
+email address and members, so people keep sending mail to the same address.
+
+You need the Exchange Administrator (or Global Administrator) role and a
+mailbox of your own. Choose one way to upgrade:
+
+- **Ask the owners to approve it.** In the Exchange admin center, go to
+  **Recipients > Groups > Distribution list**, select the list, and choose
+  **Send upgrade request**. Pick the owners to email and select **Send
+  Request**. The upgrade starts when an owner selects **Upgrade** in that
+  email.
+- **Upgrade it yourself** in PowerShell:
 
 ```powershell
-Upgrade-DistributionGroup -DlIdentities <DL email address>
+Upgrade-DistributionGroup -DlIdentities '<DL email address>'
 ```
+
+The upgrade usually finishes within 10 minutes. See Microsoft's
+[Upgrade distribution lists to Microsoft 365 Groups](https://learn.microsoft.com/exchange/recipients-in-exchange-online/manage-distribution-groups/upgrade-distribution-lists).
+If it doesn't finish, see
+[Upgrade fails even though every check passes](#upgrade-fails-even-though-every-check-passes).
 
 ## Security group
 
 **Why:** The group is a mail-enabled security group. Only distribution lists
 can be upgraded, and a security group can't be converted into one.
 
-**Fix:** Create a new Microsoft 365 group and copy the membership. Owners must
-be added as members before they can be added as owners.
+**Fix:** Create a new Microsoft 365 group and copy the membership. The
+commands copy only members a Microsoft 365 group accepts (people and shared
+mailboxes); the script's output and `Get-DistributionGroupMember` show any
+others, such as contacts or nested groups. Owners must be added as members
+before they can be added as owners.
 
 ```powershell
 $source = '<security group>'
-$new = New-UnifiedGroup -DisplayName '<display name>' -Alias '<alias>' -AccessType Private
-$members = Get-DistributionGroupMember -Identity $source -ResultSize Unlimited
+$new = New-UnifiedGroup -DisplayName '<display name>' -Alias '<new alias>' -AccessType Private -Owner '<owner>'
+$members = Get-DistributionGroupMember -Identity $source -ResultSize Unlimited |
+    Where-Object RecipientTypeDetails -in 'UserMailbox', 'SharedMailbox', 'TeamMailbox', 'MailUser'
 Add-UnifiedGroupLinks -Identity $new.Identity -LinkType Members -Links $members.PrimarySmtpAddress
 Add-UnifiedGroupLinks -Identity $new.Identity -LinkType Members -Links '<owner>'
 Add-UnifiedGroupLinks -Identity $new.Identity -LinkType Owners -Links '<owner>'
+Get-UnifiedGroupLinks -Identity $new.Identity -LinkType Owners   # check the owners
 ```
+
+If you see yourself listed as an owner and don't want to be, remove yourself
+with `Remove-UnifiedGroupLinks -LinkType Owners`.
 
 **Watch out:** Security groups often grant permissions, such as mailbox access,
 SharePoint sites or app access. The new group doesn't inherit any of them.
 Keep the security group for permissions, or re-grant each one to the new
-group. The new group can't reuse the old email address until the address is
-removed from the security group.
+group.
+
+The new group gets a new address. To move the old address to it, give the
+security group a different primary address, remove the old address from it,
+then give the old address to the new group. Mail sent to the old address
+bounces until the last command runs, so run all three together.
+
+```powershell
+Set-DistributionGroup -Identity $source -PrimarySmtpAddress '<different address>'
+Set-DistributionGroup -Identity $source -EmailAddresses @{Remove='<old address>'}
+Set-UnifiedGroup -Identity $new.Identity -PrimarySmtpAddress '<old address>'
+```
 
 ## Dynamic distribution group
 
@@ -63,8 +96,9 @@ is no fixed membership to upgrade.
 - Keep the dynamic distribution group. It keeps working as it does today.
 - Create a Microsoft 365 group with dynamic membership in the Microsoft Entra
   admin center (**Groups > New group**, membership type **Dynamic User**).
-  Rewrite the Exchange recipient filter as an Entra membership rule. Dynamic
-  membership requires Microsoft Entra ID P1 or higher.
+  Rewrite the Exchange recipient filter as an Entra membership rule; see
+  [Create or update a dynamic membership group](https://learn.microsoft.com/entra/identity/users/groups-create-rule).
+  Dynamic membership requires Microsoft Entra ID P1 or higher.
 - Create a Microsoft 365 group with fixed membership copied from the current
   members:
 
@@ -94,8 +128,10 @@ may be a non-universal group (`MailNonUniversalGroup`) left over from an older
 on-premises Exchange, or not a group at all. The script's output shows its
 `RecipientTypeDetails`.
 
-**Fix:** If it's an on-premises group, change it to a universal group in
-Active Directory and let it sync, then follow
+**Fix:** If it's an on-premises group, change its group scope to Universal in
+Active Directory (see
+[Group scope](https://learn.microsoft.com/windows-server/identity/ad-ds/manage/understand-security-groups#group-scope))
+and let it sync, then follow
 [Synced from on-premises](#synced-from-on-premises).
 Otherwise, create a new Microsoft 365 group and move the membership (see
 [Security group](#security-group)).
@@ -107,10 +143,20 @@ Otherwise, create a new Microsoft 365 group and move the membership (see
 
 **Fix (preferred): move the source of authority to the cloud.** Microsoft
 Entra group source of authority (SOA) conversion makes a synced group
-cloud-managed while it keeps its identity and membership. It needs the
-Microsoft Graph PowerShell SDK and an admin who can consent to the scopes
-below. Review Microsoft's prerequisites first:
-[Group source of authority](https://aka.ms/groupsoadocs).
+cloud-managed while it keeps its identity and membership.
+
+Before you start, check Microsoft's prerequisites in
+[Configure Group Source of Authority](https://learn.microsoft.com/entra/identity/hybrid/how-to-group-source-of-authority-configure#prerequisites).
+In short, you need:
+
+- the **Hybrid Administrator** role to make the change, and the Application
+  Administrator or Cloud Application Administrator role to approve
+  (consent to) the permissions below the first time
+- a recent sync client: Microsoft Entra Connect Sync 2.5.76.0 or later, or
+  Cloud Sync 1.1.1370.0 or later. Older versions ignore the change and keep
+  syncing from Active Directory.
+- the Microsoft Graph PowerShell SDK; see
+  [Install the Microsoft Graph PowerShell SDK](https://learn.microsoft.com/powershell/microsoftgraph/installation)
 
 ```powershell
 # Exchange Online: find the group's Entra object ID
@@ -126,9 +172,11 @@ should return `False`. Then re-run the script.
 
 **Fix (alternative): recreate the list in the cloud.** Record the list's
 members, owners, email addresses and settings. Remove it from on-premises
-Active Directory or from the sync scope, wait for the cloud copy to be
-deleted, then create a cloud distribution list with the same addresses and
-membership.
+Active Directory or from the sync scope (see
+[Microsoft Entra Connect Sync: Configure filtering](https://learn.microsoft.com/entra/identity/hybrid/connect/how-to-connect-sync-configure-filtering)),
+wait until `Get-DistributionGroup '<DL>'` no longer finds it, then create a
+cloud distribution list with the same addresses and membership
+(`New-DistributionGroup`).
 
 **Watch out:** Once the source of authority moves, changes made on-premises no
 longer sync to the cloud. Recreating the list causes a mail outage until the
@@ -209,11 +257,23 @@ guest mail users and public folders, block the upgrade.
 Remove-DistributionGroupMember -Identity '<DL>' -Member '<member>' -Confirm:$false
 ```
 
-After the upgrade, external people who still need the group's mail can be
-invited as guests (Microsoft Entra B2B) and added to the new group.
+This includes guests (`GuestMailUser`). That's expected: guests block the
+upgrade, but a Microsoft 365 group can have guests once it exists. Remove
+them now and add them back afterward.
+
+After the upgrade, add external people who still need the group's mail:
+
+1. Make sure guests are allowed in Microsoft 365 groups. See
+   [Manage guest access in Microsoft 365 groups](https://learn.microsoft.com/microsoft-365/admin/create-groups/manage-guest-access-in-groups).
+2. If the person isn't a guest in your tenant yet (for example, they were a
+   mail contact), invite them. See
+   [Add B2B collaboration users](https://learn.microsoft.com/entra/external-id/add-users-administrator).
+   If the invitation fails because the email address is already in use,
+   delete the old mail contact (`Remove-MailContact`) and try again.
+3. Add the guest to the new group:
 
 ```powershell
-Add-UnifiedGroupLinks -Identity '<new group>' -LinkType Members -Links '<guest user>'
+Add-UnifiedGroupLinks -Identity '<new group>' -LinkType Members -Links '<guest email address>'
 ```
 
 **Watch out:** Removed members stop receiving the list's mail until they're
@@ -263,20 +323,27 @@ someone monitors the shared mailbox.
 **Why:** Other distribution lists (listed in the script's output) accept mail
 only from members of this list (`AcceptMessagesOnlyFromDLMembers`).
 
-**Fix:** Remove this list from each other list's restriction. `@{Remove=...}`
-keeps the other allowed senders.
+**Fix:** For each other list, run these steps in order.
+
+**1. Record who is allowed to send to it.**
 
 ```powershell
 Get-DistributionGroup -Identity '<other DL>' | Format-List AcceptMessagesOnlyFrom*
-Set-DistributionGroup -Identity '<other DL>' -AcceptMessagesOnlyFromDLMembers @{Remove='<DL>'}
 ```
 
-**Watch out:** If this list was the only allowed sender entry, removing it
-lets **anyone** send to the other list. First add a replacement restriction,
-for example the individual people who should be allowed to send:
+**2. If this list is the only entry, add a replacement first,** for example
+the individual people who should be allowed to send. Skipping this step lets
+**anyone** send to the other list once step 3 runs.
 
 ```powershell
 Set-DistributionGroup -Identity '<other DL>' -AcceptMessagesOnlyFrom @{Add='<user1>','<user2>'}
+```
+
+**3. Remove this list from the restriction.** `@{Remove=...}` keeps the other
+allowed senders.
+
+```powershell
+Set-DistributionGroup -Identity '<other DL>' -AcceptMessagesOnlyFromDLMembers @{Remove='<DL>'}
 ```
 
 ## Alias special characters
@@ -310,20 +377,28 @@ policies always have a numeric priority
 then recreate the policy if you still need it.
 
 ```powershell
-Get-EmailAddressPolicy | Format-List Name, Priority, EnabledEmailAddressTemplates, EnabledPrimarySMTPAddressTemplate > email-address-policies.txt
+Get-EmailAddressPolicy | Format-List * > email-address-policies.txt
 Remove-EmailAddressPolicy -Identity '<policy>'
 ```
 
-After the upgrades are done:
+After the upgrades are done, recreate each policy from the values you
+recorded. Copy `Priority`, `EnabledEmailAddressTemplates` and, if it isn't
+empty, `ManagedByFilter` (which limits the policy to groups created by certain
+users):
 
 ```powershell
-New-EmailAddressPolicy -Name '<policy>' -IncludeUnifiedGroupRecipients -EnabledEmailAddressTemplates 'SMTP:@<domain>' -Priority 1
+New-EmailAddressPolicy -Name '<policy>' -IncludeUnifiedGroupRecipients -EnabledEmailAddressTemplates '<template1>','<template2>' -Priority <recorded priority>
 ```
 
+Add `-ManagedByFilter '<recorded filter>'` to that command if the policy had
+one. See
+[New-EmailAddressPolicy](https://learn.microsoft.com/powershell/module/exchange/new-emailaddresspolicy).
+
 **Watch out:** This affects the whole tenant. While the policy is gone, new
-Microsoft 365 groups get addresses in the default domain instead of the
-policy's domain. Coordinate with whoever owns the tenant's group naming and
-addressing, and keep the gap short.
+Microsoft 365 groups get addresses in the tenant's default domain instead of
+the policy's domain. Existing groups keep their addresses. Coordinate with
+whoever owns the tenant's group naming and addressing, and keep the gap
+short.
 
 ## Undocumented block
 
@@ -332,8 +407,11 @@ says the list isn't eligible, but none of the documented blockers apply.
 
 **Fix:** Try these in order:
 
-1. If someone already tried to upgrade this list and the attempt stalled or
-   failed, clear the in-progress migration flag, then retry the upgrade:
+1. If someone already tried to upgrade this list, check whether an upgrade
+   is still marked as in progress:
+   `(Get-DistributionGroup '<DL>').MigrationToUnifiedGroupInProgress`.
+   If it returns `True` and the attempt is more than an hour old, clear the
+   flag, then retry the upgrade:
    `Set-DistributionGroup -Identity '<DL>' -ResetMigrationToUnifiedGroup`
 2. Wait an hour and re-run the script. Recent changes may not have replicated.
 3. Open a Microsoft support case. Include the script's output, which shows
@@ -390,9 +468,16 @@ New-DistributionGroup -Name '<test name>' -Alias '<test alias>' -ManagedBy '<own
 Upgrade-DistributionGroup -DlIdentities '<test alias>@<domain>'
 ```
 
+Delete the test list afterward. If it upgraded, it's now a Microsoft 365
+group: `Remove-UnifiedGroup -Identity '<test alias>@<domain>'`. If not:
+`Remove-DistributionGroup -Identity '<test alias>@<domain>'`.
+
 - If the new list upgrades, the problem is specific to the original list.
-  Recreating it is usually quicker than a support case. Remove the original
-  list's email addresses before adding them to the new one.
+  Recreating it is usually quicker than a support case. Record the original
+  list's members, owners and addresses, delete it with
+  `Remove-DistributionGroup`, then create the new list with
+  `New-DistributionGroup` using the same addresses. Mail to the list bounces
+  between the two steps, so do them together.
 - If the new list also fails, something in the tenant blocks every upgrade.
   Go to step 4.
 

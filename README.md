@@ -17,19 +17,42 @@ The script is read-only. It changes nothing in the tenant. See
 
 ## Requirements
 
-- PowerShell 7+ or Windows PowerShell 5.1
-- `ExchangeOnlineManagement` module:
-  `Install-Module ExchangeOnlineManagement -Scope CurrentUser`
-- An account that can read recipients and email address policies and run
-  `Get-EligibleDistributionGroupForMigration`, for example **Exchange
-  Administrator**. A check the account lacks rights for is reported as `ERROR`;
-  the other checks still run.
+Set these up by following Microsoft's instructions linked below.
+
+- **Windows PowerShell 5.1 or PowerShell 7.** Windows PowerShell 5.1 is
+  built into Windows. Newer versions of the Exchange Online module need a
+  recent PowerShell 7; see Microsoft's
+  [supported versions](https://learn.microsoft.com/powershell/exchange/exchange-online-powershell-v2#supported-operating-systems-for-the-exchange-online-powershell-module).
+- **The Exchange Online PowerShell module (`ExchangeOnlineManagement`),
+  version 3.0.0 or later.** See
+  [Install and update the Exchange Online PowerShell module](https://learn.microsoft.com/powershell/exchange/exchange-online-powershell-v2#install-and-update-the-exchange-online-powershell-module).
+- **PowerShell allowed to run scripts.** See
+  [Set the PowerShell execution policy to RemoteSigned](https://learn.microsoft.com/powershell/exchange/exchange-online-powershell-v2#set-the-powershell-execution-policy-to-remotesigned).
+  Windows also blocks scripts downloaded from the internet until you unblock
+  them; see [Unblock-File](https://learn.microsoft.com/powershell/module/microsoft.powershell.utility/unblock-file).
+- **An admin account with the Exchange Administrator or Global Administrator
+  role.** See
+  [Permissions in Exchange Online](https://learn.microsoft.com/exchange/permissions-exo/permissions-exo).
+  A check the account lacks rights for is reported as `ERROR`; the other
+  checks still run.
+
+Fixing one blocker, a list synced from on-premises Active Directory, needs
+extra tools and roles. [RESOLVING.md](RESOLVING.md#synced-from-on-premises)
+lists them.
 
 ## Usage
+
+Download `Test-DLUpgradeReadiness.ps1` from this repository's
+[Releases page](../../releases). Open PowerShell in the folder you saved it
+to, then run:
 
 ```powershell
 .\Test-DLUpgradeReadiness.ps1 -Identity sales@contoso.com
 ```
+
+If PowerShell says the script "is not digitally signed" or "cannot be
+loaded", see the execution policy and Unblock-File links under
+[Requirements](#requirements).
 
 `-Identity` accepts an email address, alias, name or GUID. If no Exchange Online
 session is open, an interactive sign-in window appears. A session the script
@@ -52,10 +75,12 @@ Each object has `Check`, `Status` (`Pass`, `Blocked`, `Warning`, `Error`,
 
 The output contains real names, email addresses and group memberships from
 your tenant. Redact it before sharing it publicly, including in issues on this
-repository. The repo's `.gitignore` excludes `*.csv` so exported reports aren't
-committed by accident.
+repository. Save exported reports somewhere private, not in a shared or
+public folder.
 
 ## Sample output
+
+Shortened; a real report lists every check.
 
 ```text
 Distribution list: Sales Team <sales@contoso.com>
@@ -107,19 +132,14 @@ job can fail without reporting an error. If that happens, see
 | Tenant: group email address policy | A custom email address policy targets Microsoft 365 groups. This check covers the whole tenant and blocks every DL. | [Email address policy](RESOLVING.md#email-address-policy) |
 | Microsoft eligibility check | Not a blocker. It compares the result with `Get-EligibleDistributionGroupForMigration` and warns when the two disagree. For example, Microsoft may report the DL ineligible with no documented blocker found. | [Undocumented block](RESOLVING.md#undocumented-block) |
 
-The checks use server-side OPATH filters. If a tenant rejects a filter
-property, the check falls back to a full scan and prints a warning, since the
-scan can be slow in large tenants.
+A check may print a warning that it is "falling back to a full scan". This is
+normal. The check still works, but it can take several minutes in a large
+tenant.
 
-## Tests
+## Contributing
 
-Tests use Pester 5+ and mock every Exchange cmdlet, so they need neither a
-tenant nor the Exchange module.
-
-```powershell
-Install-Module Pester -MinimumVersion 5.0 -Scope CurrentUser -SkipPublisherCheck
-Invoke-Pester ./tests
-```
+Bug reports and fixes are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md),
+which also explains how to run the tests.
 
 ## License
 

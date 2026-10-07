@@ -2,9 +2,9 @@
 
 ## What the script does with your tenant
 
-- It is read-only. Apart from `Connect-ExchangeOnline` and
-  `Disconnect-ExchangeOnline`, it runs only `Get-*` cmdlets, and it makes no
-  changes to Exchange Online.
+- It is read-only. Apart from `Connect-ExchangeOnline`,
+  `Disconnect-ExchangeOnline` and `Import-Module`, it runs only `Get-*`
+  cmdlets, and it makes no changes to Exchange Online.
 - It never stores credentials. Sign-in is handled by the
   `ExchangeOnlineManagement` module's interactive sign-in.
 - It sends nothing anywhere except Exchange Online. Results go to the console
