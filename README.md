@@ -147,6 +147,50 @@ A check may print a warning that it is "falling back to a full scan". This is
 normal. The check still works, but it can take several minutes in a large
 tenant.
 
+## Microsoft's troubleshooting script
+
+Microsoft publishes its own script for this job,
+[DLT365Groupsupgrade.ps1](https://microsoft.github.io/CSS-Exchange/M365/DLT365Groupsupgrade/),
+in its CSS-Exchange tools. It is official and code-signed, and it checks most
+of the same blockers. Three checks here came from it: owner types, duplicate
+recipients, and shared mailbox `ForwardingSmtpAddress`.
+
+This script aims to be easier to use and act on:
+
+- **Says how to fix each blocker.** Every blocker comes with a one-line fix
+  and a [RESOLVING.md](RESOLVING.md) section with commands and side effects.
+  Microsoft's script links to general cmdlet reference pages, and its
+  documentation doesn't explain how to resolve what it reports.
+- **Scriptable.** It takes the list as a parameter instead of prompting for
+  it, returns result objects, and can save a CSV report.
+- **Fits your session.** It reuses an open Exchange Online session,
+  disconnects only a session it opened, and needs the Exchange Administrator
+  role. Microsoft's script asks for Global Administrator credentials and may
+  try to install the Exchange Online module itself.
+- **Faster in large tenants.** It finds parent groups, sender restrictions
+  and forwarding with server-side filters. Microsoft's script reads the
+  membership of every distribution list in the tenant.
+- **Fewer false results.** It matches objects exactly by distinguished name
+  or GUID, where Microsoft's script matches names as text, so a list named
+  `Sales` can also match `Sales-EU`. A check that can't run is reported as
+  `ERROR` instead of looking like a pass.
+- **More checks.** It also checks for lists with no members, special
+  characters in the alias, and runs Microsoft's own
+  `Get-EligibleDistributionGroupForMigration` as a cross-check.
+
+The two scripts disagree in two places. This script follows KB 4481100 in
+both:
+
+- **Member types.** Microsoft's script also accepts guests (`GuestMailUser`),
+  room and equipment mailboxes, and users without a mailbox as members. KB
+  4481100 allows only user, shared and team mailboxes and mail users.
+- **Email address policy.** Microsoft's script flags a groups email address
+  policy only when its domain differs from the list's. This script flags any
+  custom policy, as the KB does.
+
+If you can confirm in a real tenant which behavior is right, please
+[open an issue](../../issues).
+
 ## Contributing
 
 Bug reports and fixes are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md),
