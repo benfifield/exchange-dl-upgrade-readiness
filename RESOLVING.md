@@ -209,6 +209,31 @@ other owners.
 Set-DistributionGroup -Identity '<DL>' -ManagedBy @{Remove='<owner1>','<owner2>'}
 ```
 
+## Unsupported owner types
+
+**Why:** A Microsoft 365 group's owners must be user mailboxes or mail users.
+One or more owners of this list (listed in the script's output) are something
+else, such as a shared mailbox, a group, or a user with no mailbox. Microsoft's
+[DLT365Groupsupgrade troubleshooting script](https://microsoft.github.io/CSS-Exchange/M365/DLT365Groupsupgrade/)
+reports this as a blocker.
+
+**Fix:** If none of the current owners is supported, add a user mailbox or
+mail user as owner first, so the list is never left without one. Then remove
+each owner listed.
+
+```powershell
+Set-DistributionGroup -Identity '<DL>' -ManagedBy @{Add='<supported owner>'}
+Set-DistributionGroup -Identity '<DL>' -ManagedBy @{Remove='<owner>'}
+```
+
+An owner shown as "not a mail-enabled recipient" is usually a user whose
+mailbox or licence was removed. Either give them a mailbox again or remove them
+as owner.
+
+**Watch out:** People removed as owners can no longer manage the list's
+membership. If the owner was a group, add the people who should manage the
+list as owners individually.
+
 ## No members
 
 **Why:** A list with no members can't be upgraded.

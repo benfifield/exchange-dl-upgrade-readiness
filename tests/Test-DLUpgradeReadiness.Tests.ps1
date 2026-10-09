@@ -79,6 +79,40 @@ Describe 'Test-OwnerCount' {
     }
 }
 
+Describe 'Test-OwnerType' {
+    BeforeAll {
+        $script:OwnerTypes = @{ alice = 'UserMailbox'; bob = 'MailUser'; helpdesk = 'SharedMailbox'; admins = 'MailUniversalSecurityGroup' }
+        Mock Get-Recipient {
+            if (-not $script:OwnerTypes.Contains($Identity)) {
+                throw "The operation couldn't be performed because object '$Identity' couldn't be found on 'NAMPR01A001.PROD.OUTLOOK.COM'."
+            }
+            [pscustomobject]@{ DisplayName = $Identity; PrimarySmtpAddress = "$Identity@contoso.com"; RecipientTypeDetails = $script:OwnerTypes[$Identity] }
+        }
+    }
+    It 'passes when every owner is a user mailbox or mail user' {
+        (Test-OwnerType -ManagedBy @('alice', 'bob')).Status | Should -Be 'Pass'
+    }
+    It 'blocks owners of other recipient types and lists them' {
+        $r = Test-OwnerType -ManagedBy @('alice', 'helpdesk', 'admins')
+        $r.Status | Should -Be 'Blocked'
+        $r.Items | Should -HaveCount 2
+        $r.Items[0] | Should -Match 'helpdesk.*SharedMailbox'
+        $r.Items[1] | Should -Match 'admins.*MailUniversalSecurityGroup'
+    }
+    It 'blocks an owner that is not a mail-enabled recipient' {
+        $r = Test-OwnerType -ManagedBy @('alice', 'nomailbox')
+        $r.Status | Should -Be 'Blocked'
+        $r.Items[0] | Should -Match 'nomailbox.*not a mail-enabled recipient'
+    }
+    It 'rethrows other lookup errors' {
+        Mock Get-Recipient { throw 'access denied' }
+        { Test-OwnerType -ManagedBy @('alice') } | Should -Throw '*access denied*'
+    }
+    It 'returns nothing when there are no owners' {
+        Test-OwnerType -ManagedBy @() | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'Test-Membership' {
     BeforeAll {
         function New-Member($Name, $Type) {
@@ -294,12 +328,14 @@ Describe 'Resolution guidance' {
         Mock Get-DistributionGroup { $other }
         Mock Get-Mailbox { $other }
         Mock Get-EmailAddressPolicy { [pscustomobject]@{ Name = 'Groups'; Priority = 1 } }
+        Mock Get-Recipient { [pscustomobject]@{ DisplayName = 'Help Desk'; PrimarySmtpAddress = 'help@contoso.com'; RecipientTypeDetails = 'SharedMailbox' } }
         $blocked = @(
             'MailUniversalSecurityGroup', 'DynamicDistributionGroup', 'RoomList', 'UserMailbox' |
                 ForEach-Object { Test-GroupType -RecipientTypeDetails $_ }
             Test-DirSync -IsDirSynced $true
             Test-OwnerCount -ManagedBy @()
             Test-OwnerCount -ManagedBy (1..101 | ForEach-Object { "o$_" })
+            Test-OwnerType -ManagedBy @('helpdesk')
             Test-Membership -Members @()
             Test-Membership -Members @((New-Member 'g' 'MailUniversalDistributionGroup'), (New-Member 'c' 'MailContact'))
             Test-ParentGroup -DistinguishedName $script:Dn
@@ -308,7 +344,7 @@ Describe 'Resolution guidance' {
             Test-AliasCharacter -Alias 'a&b'
             Test-GroupEmailAddressPolicy
         ) | Where-Object Status -EQ 'Blocked'
-        $blocked | Should -HaveCount 15
+        $blocked | Should -HaveCount 16
         foreach ($b in $blocked) {
             $b.Resolution | Should -Not -BeNullOrEmpty -Because "$($b.Check) is blocked"
             $b.Guide | Should -BeLike 'RESOLVING.md > *'
@@ -333,6 +369,9 @@ Describe 'Get-DLUpgradeReadiness' {
         Mock Get-Recipient {
             [pscustomobject]@{ Guid = $script:Guid; RecipientTypeDetails = 'MailUniversalDistributionGroup'; DistinguishedName = $script:Dn }
         } -ParameterFilter { $Identity }
+        Mock Get-Recipient {
+            [pscustomobject]@{ DisplayName = 'Alice'; PrimarySmtpAddress = 'alice@contoso.com'; RecipientTypeDetails = 'UserMailbox' }
+        } -ParameterFilter { $Identity -eq 'alice' }
         Mock Get-DistributionGroup {
             [pscustomobject]@{
                 Guid = $script:Guid; Name = 'Sales'; DisplayName = 'Sales'; PrimarySmtpAddress = 'sales@contoso.com'; Alias = 'sales'

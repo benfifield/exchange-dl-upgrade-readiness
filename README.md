@@ -122,6 +122,7 @@ job can fail without reporting an error. If that happens, see
 | Group type | The group is a mail-enabled security group, a dynamic distribution group, a room list or another non-DL type. Remaining checks are skipped. | [Security group](RESOLVING.md#security-group), [Dynamic distribution group](RESOLVING.md#dynamic-distribution-group), [Room list](RESOLVING.md#room-list), [Unsupported group type](RESOLVING.md#unsupported-group-type) |
 | Cloud managed | The group is synced from on-premises AD (`IsDirSynced`). | [Synced from on-premises](RESOLVING.md#synced-from-on-premises) |
 | Owners | The group has no owner, or more than 100 owners. | [No owner](RESOLVING.md#no-owner), [Too many owners](RESOLVING.md#too-many-owners) |
+| Owner types | An owner isn't a `UserMailbox` or `MailUser`, for example a shared mailbox, a group or a user without a mailbox. KB 4481100 doesn't list this; Microsoft's troubleshooting script does. | [Unsupported owner types](RESOLVING.md#unsupported-owner-types) |
 | Has members | The group has no members. | [No members](RESOLVING.md#no-members) |
 | Nested: child groups | A member is itself a group. | [Child groups](RESOLVING.md#child-groups) |
 | Member types | A member isn't `UserMailbox`, `SharedMailbox`, `TeamMailbox` or `MailUser`. | [Unsupported member types](RESOLVING.md#unsupported-member-types) |

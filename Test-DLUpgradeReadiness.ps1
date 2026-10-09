@@ -48,6 +48,7 @@ $GroupMemberTypes = @(
     'MailUniversalDistributionGroup', 'MailUniversalSecurityGroup', 'MailNonUniversalGroup',
     'DynamicDistributionGroup', 'GroupMailbox', 'RoomList'
 )
+$SupportedOwnerTypes = @('UserMailbox', 'MailUser')
 $MaxOwners = 100
 $ResolutionGuide = 'RESOLVING.md'
 
@@ -60,6 +61,7 @@ $Resolutions = [ordered]@{
     'Synced from on-premises'    = 'Move the group''s source of authority to the cloud (Entra group SOA), or recreate it as a cloud distribution list.'
     'No owner'                   = 'Set-DistributionGroup -Identity <DL> -ManagedBy @{Add="<owner>"}'
     'Too many owners'            = 'Set-DistributionGroup -Identity <DL> -ManagedBy @{Remove="<owner1>","<owner2>"} until 100 or fewer remain.'
+    'Unsupported owner types'    = 'Add a user mailbox or mail user as owner if none remain, then Set-DistributionGroup -Identity <DL> -ManagedBy @{Remove="<owner>"} for each owner listed.'
     'No members'                 = 'Add-DistributionGroupMember -Identity <DL> -Member <user>'
     'Child groups'               = 'Add the child group''s members directly, then Remove-DistributionGroupMember -Identity <DL> -Member <child group>'
     'Unsupported member types'   = 'Remove-DistributionGroupMember -Identity <DL> -Member <member>. Re-add external people as guests after the upgrade.'
@@ -203,6 +205,37 @@ function Test-OwnerCount {
     }
     else {
         New-CheckResult 'Owners' 'Pass' "Has $count owner(s)."
+    }
+}
+
+function Test-OwnerType {
+    # Owners with no recipient object (for example, users without a mailbox)
+    # can't own a Microsoft 365 group. Emits nothing when there are no owners;
+    # Test-OwnerCount already blocks that case.
+    param([AllowEmptyCollection()][string[]]$ManagedBy = @())
+    $owners = @($ManagedBy | Where-Object { $_ })
+    if (-not $owners.Count) { return }
+    $unsupported = foreach ($owner in $owners) {
+        try {
+            $r = Get-Recipient -Identity $owner -ErrorAction Stop
+        }
+        catch {
+            if ($_.Exception.Message -notmatch "couldn't be found") { throw }
+            "$owner [not a mail-enabled recipient]"
+            continue
+        }
+        if ($SupportedOwnerTypes -notcontains $r.RecipientTypeDetails) {
+            "$(Format-Recipient $r) [$($r.RecipientTypeDetails)]"
+        }
+    }
+    $unsupported = @($unsupported)
+    if ($unsupported.Count) {
+        New-Blocker 'Owner types' `
+            "Has $($unsupported.Count) owner(s) that aren't $($SupportedOwnerTypes -join ' or '). Replace them." 'Unsupported owner types' `
+            -Items $unsupported
+    }
+    else {
+        New-CheckResult 'Owner types' 'Pass' 'All owners are user mailboxes or mail users.'
     }
 }
 
@@ -369,6 +402,7 @@ function Get-DLUpgradeReadiness {
     $checks = [ordered]@{
         'Cloud managed'                     = { Test-DirSync -IsDirSynced ([bool]$group.IsDirSynced) }
         'Owners'                            = { Test-OwnerCount -ManagedBy @($group.ManagedBy | ForEach-Object { "$_" }) }
+        'Owner types'                       = { Test-OwnerType -ManagedBy @($group.ManagedBy | ForEach-Object { "$_" }) }
         'Members'                           = { Test-Membership -Members @(Get-DistributionGroupMember -Identity $group.Guid.ToString() -ResultSize Unlimited -ErrorAction Stop) }
         'Nested: member of other groups'    = { Test-ParentGroup -DistinguishedName $dn -TargetIds $ids }
         'Shared mailbox forwarding'         = { Test-SharedMailboxForwarding -DistinguishedName $dn -TargetIds $ids }

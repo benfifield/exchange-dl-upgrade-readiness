@@ -4,6 +4,12 @@ Notable changes to this project. Versions follow
 [Semantic Versioning](https://semver.org/). Each release is tagged `vX.Y.Z`
 and published on the repository's Releases page.
 
+## Unreleased
+
+- New check, **Owner types**: blocks when an owner isn't a user mailbox or
+  mail user, for example a shared mailbox, a group or a user without a
+  mailbox. Microsoft's DLT365Groupsupgrade script checks this too.
+
 ## 1.1.1 - 2026-10-07
 
 - The email address policy check no longer flags the built-in
