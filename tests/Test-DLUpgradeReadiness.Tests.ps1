@@ -398,6 +398,33 @@ Describe 'Invoke-Check' {
     }
 }
 
+Describe 'Export-CheckReport' {
+    BeforeAll {
+        $script:Recipient = [pscustomobject]@{ DisplayName = 'Sales'; PrimarySmtpAddress = 'sales@contoso.com'; Guid = $script:Guid }
+        $script:Results = @(
+            New-CheckResult -Check 'Owners' -Status 'Pass' -Detail 'Has 1 owner(s).'
+            New-Blocker -Check 'Member types' -Detail 'Has 2 bad members.' -Guide 'Unsupported member types' -Items 'a <a@contoso.com> [MailContact]', 'b <b@contoso.com> [MailContact]'
+        )
+    }
+    It 'writes one row per result with the list address and joined items' {
+        $path = Join-Path $TestDrive 'report.csv'
+        Export-CheckReport -Path $path -Recipient $script:Recipient -Results $script:Results 6>$null
+        $rows = @(Import-Csv $path)
+        $rows | Should -HaveCount 2
+        $rows[0].PSObject.Properties.Name | Should -Be @('DistributionList', 'Check', 'Status', 'Detail', 'Items', 'Resolution', 'Guide')
+        $rows[0].DistributionList | Should -Be 'sales@contoso.com'
+        $rows[1].Status | Should -Be 'Blocked'
+        $rows[1].Items | Should -Be 'a <a@contoso.com> [MailContact]; b <b@contoso.com> [MailContact]'
+        $rows[1].Guide | Should -Be 'RESOLVING.md > Unsupported member types'
+    }
+    It 'overwrites an existing file' {
+        $path = Join-Path $TestDrive 'again.csv'
+        Set-Content -Path $path -Value 'old content'
+        Export-CheckReport -Path $path -Recipient $script:Recipient -Results $script:Results 6>$null
+        @(Import-Csv $path) | Should -HaveCount 2
+    }
+}
+
 Describe 'Resolution guidance' {
     BeforeAll {
         $script:GuidePath = Join-Path $PSScriptRoot '..\RESOLVING.md'

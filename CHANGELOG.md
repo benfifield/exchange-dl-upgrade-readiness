@@ -16,6 +16,10 @@ and published on the repository's Releases page.
 - The shared mailbox forwarding check now also catches mailboxes that
   forward to any of the list's SMTP addresses through
   `ForwardingSmtpAddress`, not just through `ForwardingAddress`.
+- New `-CsvPath` parameter saves the report as a CSV file, one row per
+  check, with a `DistributionList` column and the offending items joined
+  into one cell. Piping the result objects to `Export-Csv` showed `Items` as
+  `System.String[]`.
 - Fixed: when a tenant rejected a server-side filter, the "falling back to a
   full scan" path failed with `The term 'Test-IdentityMatch' is not
   recognized` and the check was reported as `ERROR`. This affected the

@@ -58,12 +58,18 @@ loaded", see the execution policy and Unblock-File links under
 session is open, an interactive sign-in window appears. A session the script
 opened is disconnected when it finishes; an existing session is left open.
 
+To also save the report as a CSV file, for example to attach to a ticket, add
+`-CsvPath`. The file has one row per check and is overwritten if it exists:
+
+```powershell
+.\Test-DLUpgradeReadiness.ps1 sales@contoso.com -CsvPath .\sales-report.csv
+```
+
 A bare run shows only the report. Result objects are written to the pipeline
 when the output is piped, or always with `-PassThru` (needed when assigning the
 output to a variable):
 
 ```powershell
-.\Test-DLUpgradeReadiness.ps1 sales@contoso.com | Export-Csv sales-report.csv -NoTypeInformation
 $r = .\Test-DLUpgradeReadiness.ps1 sales@contoso.com -PassThru
 $r | Where-Object Status -eq 'Blocked'
 ```
@@ -71,7 +77,10 @@ $r | Where-Object Status -eq 'Blocked'
 Each object has `Check`, `Status` (`Pass`, `Blocked`, `Warning`, `Error`,
 `Info`, `NotApplicable`), `Detail`, `Items` (the offending objects),
 `Resolution` (a one-line fix) and `Guide` (the RESOLVING.md section).
-`Resolution` and `Guide` are empty for results that need no fix.
+`Resolution` and `Guide` are empty for results that need no fix. The CSV file
+has the same columns plus `DistributionList`, with `Items` joined by `; `.
+Piping the objects straight to `Export-Csv` instead shows `Items` as
+`System.String[]`.
 
 The output contains real names, email addresses and group memberships from
 your tenant. Redact it before sharing it publicly, including in issues on this

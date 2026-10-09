@@ -12,12 +12,16 @@
     The script is read-only. It signs in to Exchange Online interactively if no
     session is already open, and disconnects only a session it opened itself.
 
-    A bare run shows only the report. Result objects are written to the
-    pipeline when the output is piped, or always with -PassThru:
-        .\Test-DLUpgradeReadiness.ps1 sales@contoso.com | Export-Csv report.csv
+    A bare run shows only the report. Use -CsvPath to also save it as a CSV
+    file. Result objects are written to the pipeline when the output is piped,
+    or always with -PassThru.
 
 .PARAMETER Identity
     The distribution list to evaluate: email address, alias, name or GUID.
+
+.PARAMETER CsvPath
+    Also save the report to this CSV file, one row per check, overwriting any
+    existing file. The file contains tenant data; keep it private.
 
 .PARAMETER PassThru
     Always write result objects to the pipeline, e.g. when assigning the output
@@ -25,6 +29,9 @@
 
 .EXAMPLE
     .\Test-DLUpgradeReadiness.ps1 -Identity sales@contoso.com
+
+.EXAMPLE
+    .\Test-DLUpgradeReadiness.ps1 -Identity sales@contoso.com -CsvPath .\sales-report.csv
 
 .EXAMPLE
     $r = .\Test-DLUpgradeReadiness.ps1 -Identity sales@contoso.com -PassThru
@@ -37,6 +44,8 @@
 param(
     [Parameter(Mandatory, Position = 0)]
     [string]$Identity,
+
+    [string]$CsvPath,
 
     [switch]$PassThru
 )
@@ -525,6 +534,25 @@ function Write-CheckReport {
     Write-Host ''
 }
 
+function Export-CheckReport {
+    # Writes results to CSV, one row per check. Items are joined into one cell;
+    # piping the raw objects to Export-Csv would show them as System.String[].
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'Console confirmation alongside the colored report.')]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)]$Recipient,
+        [Parameter(Mandatory)][object[]]$Results
+    )
+    # A BOM lets Excel open non-ASCII names correctly; only 'utf8BOM' adds one in PowerShell 7.
+    $encoding = if ($PSVersionTable.PSVersion.Major -ge 6) { 'utf8BOM' } else { 'UTF8' }
+    $list = "$($Recipient.PrimarySmtpAddress)"
+    $Results | Select-Object @{ n = 'DistributionList'; e = { $list } },
+        Check, Status, Detail, @{ n = 'Items'; e = { $_.Items -join '; ' } }, Resolution, Guide |
+        Export-Csv -Path $Path -NoTypeInformation -Encoding $encoding -ErrorAction Stop
+    Write-Host "Report saved to $((Resolve-Path -LiteralPath $Path).Path)" -ForegroundColor Gray
+    Write-Host ''
+}
+
 # --- Main (skipped when dot-sourced, e.g. by the Pester tests) ---
 if ($MyInvocation.InvocationName -ne '.') {
     # Checked at runtime, not with #Requires, so tests can dot-source without the module.
@@ -543,6 +571,7 @@ if ($MyInvocation.InvocationName -ne '.') {
         $recipient = Get-Recipient -Identity $Identity -ErrorAction Stop
         $results = @(Get-DLUpgradeReadiness -Identity $recipient.Guid.ToString())
         Write-CheckReport -Recipient $recipient -Results $results
+        if ($CsvPath) { Export-CheckReport -Path $CsvPath -Recipient $recipient -Results $results }
         # Emit objects only when a caller consumes them; a bare run shows just the report.
         if ($PassThru -or $MyInvocation.PipelinePosition -lt $MyInvocation.PipelineLength) {
             $results
