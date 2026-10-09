@@ -4,6 +4,30 @@ Notable changes to this project. Versions follow
 [Semantic Versioning](https://semver.org/). Each release is tagged `vX.Y.Z`
 and published on the repository's Releases page.
 
+## Unreleased
+
+- New check, **Owner types**: blocks when an owner isn't a user mailbox or
+  mail user, for example a shared mailbox, a group or a user without a
+  mailbox. Microsoft's DLT365Groupsupgrade script checks this too.
+- New check, **Duplicate recipients**: warns when another recipient,
+  including a soft-deleted one, has the same alias, name or primary email
+  address as the list. It's a warning because KB 4481100 doesn't list it;
+  Microsoft's DLT365Groupsupgrade script reports it as a blocker.
+- The shared mailbox forwarding check now also catches mailboxes that
+  forward to any of the list's SMTP addresses through
+  `ForwardingSmtpAddress`, not just through `ForwardingAddress`.
+- New `-CsvPath` parameter saves the report as a CSV file, one row per
+  check, with a `DistributionList` column and the offending items joined
+  into one cell. Piping the result objects to `Export-Csv` showed `Items` as
+  `System.String[]`.
+- README has a new section comparing this script with Microsoft's
+  DLT365Groupsupgrade.ps1, including the two rules where they disagree.
+- Fixed: when a tenant rejected a server-side filter, the "falling back to a
+  full scan" path failed with `The term 'Test-IdentityMatch' is not
+  recognized` and the check was reported as `ERROR`. This affected the
+  parent group, shared mailbox forwarding and sender restriction checks when
+  the script was run from a PowerShell prompt.
+
 ## 1.1.1 - 2026-10-07
 
 - The email address policy check no longer flags the built-in

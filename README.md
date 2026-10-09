@@ -6,6 +6,9 @@ Explains **why** a distribution list (DL) can't be upgraded to a Microsoft 365
 group. The script checks one DL against every blocker in Microsoft KB 4481100,
 [Can't upgrade distribution lists to Microsoft 365 Groups](https://learn.microsoft.com/troubleshoot/exchange/groups-and-distribution-lists/cannot-upgrade-distribution-lists-to-office-365-groups),
 and names the members, groups, mailboxes or policies causing each blocker.
+It also runs two checks that only Microsoft's own troubleshooting script
+reports, owner types and duplicate recipients. See
+[Microsoft's troubleshooting script](#microsofts-troubleshooting-script).
 
 The script is read-only. It changes nothing in the tenant. See
 [SECURITY.md](SECURITY.md) for details.
@@ -58,12 +61,18 @@ loaded", see the execution policy and Unblock-File links under
 session is open, an interactive sign-in window appears. A session the script
 opened is disconnected when it finishes; an existing session is left open.
 
+To also save the report as a CSV file, for example to attach to a ticket, add
+`-CsvPath`. The file has one row per check and is overwritten if it exists:
+
+```powershell
+.\Test-DLUpgradeReadiness.ps1 sales@contoso.com -CsvPath .\sales-report.csv
+```
+
 A bare run shows only the report. Result objects are written to the pipeline
 when the output is piped, or always with `-PassThru` (needed when assigning the
 output to a variable):
 
 ```powershell
-.\Test-DLUpgradeReadiness.ps1 sales@contoso.com | Export-Csv sales-report.csv -NoTypeInformation
 $r = .\Test-DLUpgradeReadiness.ps1 sales@contoso.com -PassThru
 $r | Where-Object Status -eq 'Blocked'
 ```
@@ -71,7 +80,10 @@ $r | Where-Object Status -eq 'Blocked'
 Each object has `Check`, `Status` (`Pass`, `Blocked`, `Warning`, `Error`,
 `Info`, `NotApplicable`), `Detail`, `Items` (the offending objects),
 `Resolution` (a one-line fix) and `Guide` (the RESOLVING.md section).
-`Resolution` and `Guide` are empty for results that need no fix.
+`Resolution` and `Guide` are empty for results that need no fix. The CSV file
+has the same columns plus `DistributionList`, with `Items` joined by `; `.
+Piping the objects straight to `Export-Csv` instead shows `Items` as
+`System.String[]`.
 
 The output contains real names, email addresses and group memberships from
 your tenant. Redact it before sharing it publicly, including in issues on this
@@ -122,19 +134,66 @@ job can fail without reporting an error. If that happens, see
 | Group type | The group is a mail-enabled security group, a dynamic distribution group, a room list or another non-DL type. Remaining checks are skipped. | [Security group](RESOLVING.md#security-group), [Dynamic distribution group](RESOLVING.md#dynamic-distribution-group), [Room list](RESOLVING.md#room-list), [Unsupported group type](RESOLVING.md#unsupported-group-type) |
 | Cloud managed | The group is synced from on-premises AD (`IsDirSynced`). | [Synced from on-premises](RESOLVING.md#synced-from-on-premises) |
 | Owners | The group has no owner, or more than 100 owners. | [No owner](RESOLVING.md#no-owner), [Too many owners](RESOLVING.md#too-many-owners) |
+| Owner types | An owner isn't a `UserMailbox` or `MailUser`, for example a shared mailbox, a group or a user without a mailbox. KB 4481100 doesn't list this; Microsoft's troubleshooting script does. | [Unsupported owner types](RESOLVING.md#unsupported-owner-types) |
 | Has members | The group has no members. | [No members](RESOLVING.md#no-members) |
 | Nested: child groups | A member is itself a group. | [Child groups](RESOLVING.md#child-groups) |
 | Member types | A member isn't `UserMailbox`, `SharedMailbox`, `TeamMailbox` or `MailUser`. | [Unsupported member types](RESOLVING.md#unsupported-member-types) |
 | Nested: member of other groups | The group is a member of another group. | [Member of other groups](RESOLVING.md#member-of-other-groups) |
-| Shared mailbox forwarding | A shared mailbox forwards to the group. | [Shared mailbox forwarding](RESOLVING.md#shared-mailbox-forwarding) |
+| Shared mailbox forwarding | A shared mailbox forwards to the group, through `ForwardingAddress` or `ForwardingSmtpAddress` (any of the group's SMTP addresses). | [Shared mailbox forwarding](RESOLVING.md#shared-mailbox-forwarding) |
 | Sender restriction in other DLs | Another DL accepts mail only from this group's members. | [Sender restriction](RESOLVING.md#sender-restriction) |
 | Alias characters | The alias contains characters other than letters, digits, `.`, `-` and `_`. Microsoft's article says only "special characters" without listing them, so this allowed set is an inference and may be stricter or looser than Microsoft's actual rule. | [Alias special characters](RESOLVING.md#alias-special-characters) |
+| Duplicate recipients | Warning only. Another recipient, including a soft-deleted one, has the same alias, name or primary email address. KB 4481100 doesn't list this; Microsoft's troubleshooting script reports it as a blocker. | [Duplicate recipient](RESOLVING.md#duplicate-recipient) |
 | Tenant: group email address policy | A custom email address policy targets Microsoft 365 groups. This check covers the whole tenant and blocks every DL. | [Email address policy](RESOLVING.md#email-address-policy) |
 | Microsoft eligibility check | Not a blocker. It compares the result with `Get-EligibleDistributionGroupForMigration` and warns when the two disagree. For example, Microsoft may report the DL ineligible with no documented blocker found. | [Undocumented block](RESOLVING.md#undocumented-block) |
 
 A check may print a warning that it is "falling back to a full scan". This is
 normal. The check still works, but it can take several minutes in a large
 tenant.
+
+## Microsoft's troubleshooting script
+
+Microsoft publishes its own script for this job,
+[DLT365Groupsupgrade.ps1](https://microsoft.github.io/CSS-Exchange/M365/DLT365Groupsupgrade/),
+in its CSS-Exchange tools. It is official and code-signed, and it checks most
+of the same blockers. Three checks here came from it: owner types, duplicate
+recipients, and shared mailbox `ForwardingSmtpAddress`.
+
+This script aims to be easier to use and act on:
+
+- **Says how to fix each blocker.** Every blocker comes with a one-line fix
+  and a [RESOLVING.md](RESOLVING.md) section with commands and side effects.
+  Microsoft's script links to general cmdlet reference pages, and its
+  documentation doesn't explain how to resolve what it reports.
+- **Scriptable.** It takes the list as a parameter instead of prompting for
+  it, returns result objects, and can save a CSV report.
+- **Fits your session.** It reuses an open Exchange Online session,
+  disconnects only a session it opened, and needs the Exchange Administrator
+  role. Microsoft's script asks for Global Administrator credentials and may
+  try to install the Exchange Online module itself.
+- **Faster in large tenants.** It finds parent groups, sender restrictions
+  and forwarding with server-side filters. Microsoft's script reads the
+  membership of every distribution list in the tenant.
+- **Fewer false results.** Its server-side filters match the list by
+  distinguished name, and its other lookups compare whole values. Microsoft's
+  script matches names as text patterns, so a list named `Sales` can also
+  match `Sales-EU`. A check that can't run is reported as `ERROR` instead of
+  looking like a pass.
+- **More checks.** It also checks for lists with no members, special
+  characters in the alias, and runs Microsoft's own
+  `Get-EligibleDistributionGroupForMigration` as a cross-check.
+
+The two scripts disagree in two places. This script follows KB 4481100 in
+both:
+
+- **Member types.** Microsoft's script also accepts guests (`GuestMailUser`),
+  room and equipment mailboxes, and users without a mailbox as members. KB
+  4481100 allows only user, shared and team mailboxes and mail users.
+- **Email address policy.** Microsoft's script flags a groups email address
+  policy only when its domain differs from the list's. This script flags any
+  custom policy, as the KB does.
+
+If you can confirm in a real tenant which behavior is right, please
+[open an issue](../../issues).
 
 ## Contributing
 

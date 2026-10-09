@@ -8,7 +8,7 @@ BeforeDiscovery {
 
 BeforeAll {
     # Stub Exchange Online cmdlets so tests run without the module or a tenant.
-    function Get-Recipient { param($Identity, $Filter, $ResultSize, $ErrorAction) }
+    function Get-Recipient { param($Identity, $Filter, $ResultSize, [switch]$IncludeSoftDeletedRecipients, $ErrorAction) }
     function Get-DistributionGroup { param($Identity, $Filter, $ResultSize, $ErrorAction) }
     function Get-DistributionGroupMember { param($Identity, $ResultSize, $ErrorAction) }
     function Get-Mailbox { param($RecipientTypeDetails, $Filter, $ResultSize, $ErrorAction) }
@@ -79,6 +79,40 @@ Describe 'Test-OwnerCount' {
     }
 }
 
+Describe 'Test-OwnerType' {
+    BeforeAll {
+        $script:OwnerTypes = @{ alice = 'UserMailbox'; bob = 'MailUser'; helpdesk = 'SharedMailbox'; admins = 'MailUniversalSecurityGroup' }
+        Mock Get-Recipient {
+            if (-not $script:OwnerTypes.Contains($Identity)) {
+                throw "The operation couldn't be performed because object '$Identity' couldn't be found on 'NAMPR01A001.PROD.OUTLOOK.COM'."
+            }
+            [pscustomobject]@{ DisplayName = $Identity; PrimarySmtpAddress = "$Identity@contoso.com"; RecipientTypeDetails = $script:OwnerTypes[$Identity] }
+        }
+    }
+    It 'passes when every owner is a user mailbox or mail user' {
+        (Test-OwnerType -ManagedBy @('alice', 'bob')).Status | Should -Be 'Pass'
+    }
+    It 'blocks owners of other recipient types and lists them' {
+        $r = Test-OwnerType -ManagedBy @('alice', 'helpdesk', 'admins')
+        $r.Status | Should -Be 'Blocked'
+        $r.Items | Should -HaveCount 2
+        $r.Items[0] | Should -Match 'helpdesk.*SharedMailbox'
+        $r.Items[1] | Should -Match 'admins.*MailUniversalSecurityGroup'
+    }
+    It 'blocks an owner that is not a mail-enabled recipient' {
+        $r = Test-OwnerType -ManagedBy @('alice', 'nomailbox')
+        $r.Status | Should -Be 'Blocked'
+        $r.Items[0] | Should -Match 'nomailbox.*not a mail-enabled recipient'
+    }
+    It 'rethrows other lookup errors' {
+        Mock Get-Recipient { throw 'access denied' }
+        { Test-OwnerType -ManagedBy @('alice') } | Should -Throw '*access denied*'
+    }
+    It 'returns nothing when there are no owners' {
+        Test-OwnerType -ManagedBy @() | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'Test-Membership' {
     BeforeAll {
         function New-Member($Name, $Type) {
@@ -145,6 +179,21 @@ Describe 'Test-ParentGroup' {
         $r.Items[0] | Should -Match 'All Staff'
         Should -Invoke Get-DistributionGroup -ParameterFilter { $Filter -like 'Members -eq *' }
     }
+    It 'finds parent groups in the fallback scan' {
+        # Regression: fallbacks built with .GetNewClosure() couldn't call Test-IdentityMatch.
+        Mock Get-DistributionGroup { throw "'Members' is not a recognized filterable property." } -ParameterFilter { $Filter }
+        $allStaff = [guid]'22222222-2222-2222-2222-222222222222'
+        Mock Get-DistributionGroup { @(
+            [pscustomobject]@{ DisplayName = 'All Staff'; PrimarySmtpAddress = 'all@contoso.com'; Guid = $allStaff }
+            [pscustomobject]@{ DisplayName = 'Unrelated'; PrimarySmtpAddress = 'other@contoso.com'; Guid = [guid]'33333333-3333-3333-3333-333333333333' }
+        ) } -ParameterFilter { -not $Filter }
+        Mock Get-DistributionGroupMember { [pscustomobject]@{ DistinguishedName = $script:Dn; Guid = $script:Guid } } -ParameterFilter { $Identity -eq $allStaff.ToString() }
+        Mock Get-DistributionGroupMember { [pscustomobject]@{ DistinguishedName = 'CN=Someone'; Guid = [guid]::NewGuid() } } -ParameterFilter { $Identity -ne $allStaff.ToString() }
+        $r = Test-ParentGroup -DistinguishedName $script:Dn -WarningAction SilentlyContinue
+        $r.Status | Should -Be 'Blocked'
+        $r.Items | Should -HaveCount 1
+        $r.Items[0] | Should -Match 'All Staff'
+    }
     It 'passes when no parent groups exist' {
         Mock Get-DistributionGroup { }
         (Test-ParentGroup -DistinguishedName $script:Dn).Status | Should -Be 'Pass'
@@ -163,6 +212,24 @@ Describe 'Test-SharedMailboxForwarding' {
         Mock Get-Mailbox { }
         (Test-SharedMailboxForwarding -DistinguishedName $script:Dn).Status | Should -Be 'Pass'
     }
+    It 'also filters on ForwardingSmtpAddress for each SMTP address' {
+        Mock Get-Mailbox { }
+        Test-SharedMailboxForwarding -DistinguishedName $script:Dn -SmtpAddresses 'sales@contoso.com', 'sales@fabrikam.com' | Out-Null
+        Should -Invoke Get-Mailbox -ParameterFilter {
+            $Filter -like "*ForwardingSmtpAddress -eq 'sales@contoso.com'*" -and $Filter -like "*ForwardingSmtpAddress -eq 'sales@fabrikam.com'*"
+        }
+    }
+    It 'matches ForwardingSmtpAddress in the fallback scan' {
+        Mock Get-Mailbox { throw "'ForwardingSmtpAddress' is not a recognized filterable property." } -ParameterFilter { $Filter }
+        Mock Get-Mailbox { @(
+            [pscustomobject]@{ DisplayName = 'Help Desk'; PrimarySmtpAddress = 'help@contoso.com'; ForwardingAddress = $null; ForwardingSmtpAddress = 'smtp:Sales@Contoso.com' }
+            [pscustomobject]@{ DisplayName = 'Other'; PrimarySmtpAddress = 'other@contoso.com'; ForwardingAddress = $null; ForwardingSmtpAddress = 'smtp:sales-eu@contoso.com' }
+        ) } -ParameterFilter { -not $Filter }
+        $r = Test-SharedMailboxForwarding -DistinguishedName $script:Dn -SmtpAddresses 'sales@contoso.com' -WarningAction SilentlyContinue
+        $r.Status | Should -Be 'Blocked'
+        $r.Items | Should -HaveCount 1
+        $r.Items[0] | Should -Match 'Help Desk'
+    }
 }
 
 Describe 'Test-SenderRestriction' {
@@ -172,6 +239,17 @@ Describe 'Test-SenderRestriction' {
         $r.Status | Should -Be 'Blocked'
         $r.Items[0] | Should -Match 'Execs'
         Should -Invoke Get-DistributionGroup -ParameterFilter { $Filter -like 'AcceptMessagesOnlyFromDLMembers -eq *' }
+    }
+    It 'finds restricting DLs in the fallback scan' {
+        Mock Get-DistributionGroup { throw "'AcceptMessagesOnlyFromDLMembers' is not a recognized filterable property." } -ParameterFilter { $Filter }
+        Mock Get-DistributionGroup { @(
+            [pscustomobject]@{ DisplayName = 'Execs'; PrimarySmtpAddress = 'execs@contoso.com'; Guid = [guid]::NewGuid(); AcceptMessagesOnlyFromDLMembers = @($script:Dn) }
+            [pscustomobject]@{ DisplayName = 'Open'; PrimarySmtpAddress = 'open@contoso.com'; Guid = [guid]::NewGuid(); AcceptMessagesOnlyFromDLMembers = @() }
+        ) } -ParameterFilter { -not $Filter }
+        $r = Test-SenderRestriction -DistinguishedName $script:Dn -Guid $script:Guid -WarningAction SilentlyContinue
+        $r.Status | Should -Be 'Blocked'
+        $r.Items | Should -HaveCount 1
+        $r.Items[0] | Should -Match 'Execs'
     }
     It 'ignores the group restricting itself' {
         Mock Get-DistributionGroup { @([pscustomobject]@{ DisplayName = 'Sales'; PrimarySmtpAddress = 'sales@contoso.com'; Guid = $script:Guid }) }
@@ -199,6 +277,64 @@ Describe 'Test-AliasCharacter' {
         $r = Test-AliasCharacter -Alias $Alias
         $r.Status | Should -Be 'Blocked'
         $r.Items -join '' | Should -BeLike "*$Bad*"
+    }
+}
+
+Describe 'Test-DuplicateRecipient' {
+    BeforeAll {
+        $script:Self = [pscustomobject]@{
+            DisplayName = 'Sales'; Name = 'Sales'; Alias = 'sales'; PrimarySmtpAddress = 'sales@contoso.com'
+            EmailAddresses = @('SMTP:sales@contoso.com'); RecipientTypeDetails = 'MailUniversalDistributionGroup'; Guid = $script:Guid
+        }
+        # Shares every value; mocks below decide which lookups return it.
+        $script:Dup = [pscustomobject]@{
+            DisplayName = 'Old Sales'; Name = 'Sales'; Alias = 'SALES'; PrimarySmtpAddress = 'oldsales@contoso.com'
+            EmailAddresses = @('SMTP:oldsales@contoso.com', 'smtp:Sales@Contoso.com'); RecipientTypeDetails = 'UserMailbox'
+            Guid = [guid]'44444444-4444-4444-4444-444444444444'
+        }
+        function Invoke-DuplicateTest {
+            Test-DuplicateRecipient -Guid $script:Guid -Alias 'sales' -Name 'Sales' -PrimarySmtpAddress 'sales@contoso.com'
+        }
+    }
+    It 'passes when only the group itself matches' {
+        Mock Get-Recipient { $script:Self }
+        (Invoke-DuplicateTest).Status | Should -Be 'Pass'
+    }
+    It 'warns when another recipient shares the alias, and says which value clashed' {
+        Mock Get-Recipient { $script:Self; if ($Identity -eq 'sales') { $script:Dup } }
+        $r = Invoke-DuplicateTest
+        $r.Status | Should -Be 'Warning'
+        $r.Items | Should -HaveCount 1
+        $r.Items[0] | Should -Match 'Old Sales.*UserMailbox.*alias'
+        $r.Resolution | Should -Not -BeNullOrEmpty
+    }
+    It 'lists a recipient once even if it matches several values' {
+        Mock Get-Recipient { $script:Self; $script:Dup }
+        $r = Invoke-DuplicateTest
+        $r.Items | Should -HaveCount 1
+        $r.Items[0] | Should -Match 'alias, name, email address'
+    }
+    It 'ignores a recipient whose display name matches the list''s name' {
+        # -Identity also resolves display names, which don't need to be unique.
+        $other = [pscustomobject]@{
+            DisplayName = 'Sales'; Name = 'Sales Archive'; Alias = 'salesarchive'; PrimarySmtpAddress = 'salesarchive@contoso.com'
+            EmailAddresses = @('SMTP:salesarchive@contoso.com'); RecipientTypeDetails = 'MailUniversalDistributionGroup'; Guid = [guid]::NewGuid()
+        }
+        Mock Get-Recipient { $script:Self; if ($Identity -eq 'Sales') { $other } }
+        (Invoke-DuplicateTest).Status | Should -Be 'Pass'
+    }
+    It 'includes soft-deleted recipients' {
+        Mock Get-Recipient { $script:Self }
+        Invoke-DuplicateTest | Out-Null
+        Should -Invoke Get-Recipient -Times 3 -Exactly -ParameterFilter { $IncludeSoftDeletedRecipients }
+    }
+    It 'treats a value that matches nothing as no duplicate' {
+        Mock Get-Recipient { throw "The operation couldn't be performed because object '$Identity' couldn't be found on 'NAMPR01A001.PROD.OUTLOOK.COM'." }
+        (Invoke-DuplicateTest).Status | Should -Be 'Pass'
+    }
+    It 'rethrows other lookup errors' {
+        Mock Get-Recipient { throw 'access denied' }
+        { Invoke-DuplicateTest } | Should -Throw '*access denied*'
     }
 }
 
@@ -279,6 +415,33 @@ Describe 'Invoke-Check' {
     }
 }
 
+Describe 'Export-CheckReport' {
+    BeforeAll {
+        $script:Recipient = [pscustomobject]@{ DisplayName = 'Sales'; PrimarySmtpAddress = 'sales@contoso.com'; Guid = $script:Guid }
+        $script:Results = @(
+            New-CheckResult -Check 'Owners' -Status 'Pass' -Detail 'Has 1 owner(s).'
+            New-Blocker -Check 'Member types' -Detail 'Has 2 bad members.' -Guide 'Unsupported member types' -Items 'a <a@contoso.com> [MailContact]', 'b <b@contoso.com> [MailContact]'
+        )
+    }
+    It 'writes one row per result with the list address and joined items' {
+        $path = Join-Path $TestDrive 'report.csv'
+        Export-CheckReport -Path $path -Recipient $script:Recipient -Results $script:Results 6>$null
+        $rows = @(Import-Csv $path)
+        $rows | Should -HaveCount 2
+        $rows[0].PSObject.Properties.Name | Should -Be @('DistributionList', 'Check', 'Status', 'Detail', 'Items', 'Resolution', 'Guide')
+        $rows[0].DistributionList | Should -Be 'sales@contoso.com'
+        $rows[1].Status | Should -Be 'Blocked'
+        $rows[1].Items | Should -Be 'a <a@contoso.com> [MailContact]; b <b@contoso.com> [MailContact]'
+        $rows[1].Guide | Should -Be 'RESOLVING.md > Unsupported member types'
+    }
+    It 'overwrites an existing file' {
+        $path = Join-Path $TestDrive 'again.csv'
+        Set-Content -Path $path -Value 'old content'
+        Export-CheckReport -Path $path -Recipient $script:Recipient -Results $script:Results 6>$null
+        @(Import-Csv $path) | Should -HaveCount 2
+    }
+}
+
 Describe 'Resolution guidance' {
     BeforeAll {
         $script:GuidePath = Join-Path $PSScriptRoot '..\RESOLVING.md'
@@ -294,12 +457,14 @@ Describe 'Resolution guidance' {
         Mock Get-DistributionGroup { $other }
         Mock Get-Mailbox { $other }
         Mock Get-EmailAddressPolicy { [pscustomobject]@{ Name = 'Groups'; Priority = 1 } }
+        Mock Get-Recipient { [pscustomobject]@{ DisplayName = 'Help Desk'; PrimarySmtpAddress = 'help@contoso.com'; RecipientTypeDetails = 'SharedMailbox' } }
         $blocked = @(
             'MailUniversalSecurityGroup', 'DynamicDistributionGroup', 'RoomList', 'UserMailbox' |
                 ForEach-Object { Test-GroupType -RecipientTypeDetails $_ }
             Test-DirSync -IsDirSynced $true
             Test-OwnerCount -ManagedBy @()
             Test-OwnerCount -ManagedBy (1..101 | ForEach-Object { "o$_" })
+            Test-OwnerType -ManagedBy @('helpdesk')
             Test-Membership -Members @()
             Test-Membership -Members @((New-Member 'g' 'MailUniversalDistributionGroup'), (New-Member 'c' 'MailContact'))
             Test-ParentGroup -DistinguishedName $script:Dn
@@ -308,7 +473,7 @@ Describe 'Resolution guidance' {
             Test-AliasCharacter -Alias 'a&b'
             Test-GroupEmailAddressPolicy
         ) | Where-Object Status -EQ 'Blocked'
-        $blocked | Should -HaveCount 15
+        $blocked | Should -HaveCount 16
         foreach ($b in $blocked) {
             $b.Resolution | Should -Not -BeNullOrEmpty -Because "$($b.Check) is blocked"
             $b.Guide | Should -BeLike 'RESOLVING.md > *'
@@ -333,9 +498,13 @@ Describe 'Get-DLUpgradeReadiness' {
         Mock Get-Recipient {
             [pscustomobject]@{ Guid = $script:Guid; RecipientTypeDetails = 'MailUniversalDistributionGroup'; DistinguishedName = $script:Dn }
         } -ParameterFilter { $Identity }
+        Mock Get-Recipient {
+            [pscustomobject]@{ DisplayName = 'Alice'; PrimarySmtpAddress = 'alice@contoso.com'; RecipientTypeDetails = 'UserMailbox' }
+        } -ParameterFilter { $Identity -eq 'alice' }
         Mock Get-DistributionGroup {
             [pscustomobject]@{
                 Guid = $script:Guid; Name = 'Sales'; DisplayName = 'Sales'; PrimarySmtpAddress = 'sales@contoso.com'; Alias = 'sales'
+                EmailAddresses = @('SMTP:sales@contoso.com', 'smtp:sales@contoso.onmicrosoft.com', 'X500:/o=ExchangeLabs/cn=Recipients/cn=sales')
                 DistinguishedName = $script:Dn; IsDirSynced = $false; ManagedBy = @('alice')
             }
         } -ParameterFilter { $Identity }
@@ -359,6 +528,12 @@ Describe 'Get-DLUpgradeReadiness' {
         $r | Should -HaveCount 1
         $r.Status | Should -Be 'Blocked'
         Should -Invoke Get-DistributionGroupMember -Times 0 -Scope It
+    }
+    It 'checks forwarding to every SMTP address of the group' {
+        Get-DLUpgradeReadiness -Identity 'sales' | Out-Null
+        Should -Invoke Get-Mailbox -ParameterFilter {
+            $Filter -like "*ForwardingSmtpAddress -eq 'sales@contoso.onmicrosoft.com'*" -and $Filter -notlike '*X500*'
+        }
     }
     It 'keeps running other checks when one check errors' {
         Mock Get-Mailbox { throw 'transient failure' }

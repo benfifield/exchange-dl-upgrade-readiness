@@ -6,18 +6,24 @@
     Evaluates one distribution list against every upgrade blocker documented in
     Microsoft KB 4481100 ("Can't upgrade distribution lists to Microsoft 365
     Groups") and prints each blocker found, naming the offending members, groups,
-    mailboxes or policies. Also runs Microsoft's own
+    mailboxes or policies. Also checks owner types and duplicate recipients,
+    which Microsoft's DLT365Groupsupgrade troubleshooting script reports but
+    the KB doesn't list, and runs Microsoft's own
     Get-EligibleDistributionGroupForMigration as a cross-check.
 
     The script is read-only. It signs in to Exchange Online interactively if no
     session is already open, and disconnects only a session it opened itself.
 
-    A bare run shows only the report. Result objects are written to the
-    pipeline when the output is piped, or always with -PassThru:
-        .\Test-DLUpgradeReadiness.ps1 sales@contoso.com | Export-Csv report.csv
+    A bare run shows only the report. Use -CsvPath to also save it as a CSV
+    file. Result objects are written to the pipeline when the output is piped,
+    or always with -PassThru.
 
 .PARAMETER Identity
     The distribution list to evaluate: email address, alias, name or GUID.
+
+.PARAMETER CsvPath
+    Also save the report to this CSV file, one row per check, overwriting any
+    existing file. The file contains tenant data; keep it private.
 
 .PARAMETER PassThru
     Always write result objects to the pipeline, e.g. when assigning the output
@@ -25,6 +31,9 @@
 
 .EXAMPLE
     .\Test-DLUpgradeReadiness.ps1 -Identity sales@contoso.com
+
+.EXAMPLE
+    .\Test-DLUpgradeReadiness.ps1 -Identity sales@contoso.com -CsvPath .\sales-report.csv
 
 .EXAMPLE
     $r = .\Test-DLUpgradeReadiness.ps1 -Identity sales@contoso.com -PassThru
@@ -38,6 +47,8 @@ param(
     [Parameter(Mandatory, Position = 0)]
     [string]$Identity,
 
+    [string]$CsvPath,
+
     [switch]$PassThru
 )
 
@@ -48,6 +59,7 @@ $GroupMemberTypes = @(
     'MailUniversalDistributionGroup', 'MailUniversalSecurityGroup', 'MailNonUniversalGroup',
     'DynamicDistributionGroup', 'GroupMailbox', 'RoomList'
 )
+$SupportedOwnerTypes = @('UserMailbox', 'MailUser')
 $MaxOwners = 100
 $ResolutionGuide = 'RESOLVING.md'
 
@@ -60,13 +72,15 @@ $Resolutions = [ordered]@{
     'Synced from on-premises'    = 'Move the group''s source of authority to the cloud (Entra group SOA), or recreate it as a cloud distribution list.'
     'No owner'                   = 'Set-DistributionGroup -Identity <DL> -ManagedBy @{Add="<owner>"}'
     'Too many owners'            = 'Set-DistributionGroup -Identity <DL> -ManagedBy @{Remove="<owner1>","<owner2>"} until 100 or fewer remain.'
+    'Unsupported owner types'    = 'Add a user mailbox or mail user as owner if none remain, then Set-DistributionGroup -Identity <DL> -ManagedBy @{Remove="<owner>"} for each owner listed.'
     'No members'                 = 'Add-DistributionGroupMember -Identity <DL> -Member <user>'
     'Child groups'               = 'Add the child group''s members directly, then Remove-DistributionGroupMember -Identity <DL> -Member <child group>'
     'Unsupported member types'   = 'Remove-DistributionGroupMember -Identity <DL> -Member <member>. Re-add external people as guests after the upgrade.'
     'Member of other groups'     = 'Remove-DistributionGroupMember -Identity <parent group> -Member <DL> for each parent listed.'
-    'Shared mailbox forwarding'  = 'Set-Mailbox -Identity <shared mailbox> -ForwardingAddress $null for each mailbox listed. Re-point forwarding after the upgrade.'
+    'Shared mailbox forwarding'  = 'Set-Mailbox -Identity <shared mailbox> -ForwardingAddress $null -ForwardingSmtpAddress $null for each mailbox listed. Re-point forwarding after the upgrade.'
     'Sender restriction'         = 'Set-DistributionGroup -Identity <other DL> -AcceptMessagesOnlyFromDLMembers @{Remove="<DL>"} for each DL listed.'
     'Alias special characters'   = 'Set-DistributionGroup -Identity <DL> -Alias <new alias using only letters, digits, . - _>'
+    'Duplicate recipient'        = 'Find each recipient listed with Get-Recipient -Identity <value> -IncludeSoftDeletedRecipients. Change its alias or address, or permanently delete it if it''s soft-deleted and no longer needed.'
     'Email address policy'       = 'Record the policy settings, then Remove-EmailAddressPolicy -Identity <policy>. Affects the whole tenant.'
     'Undocumented block'         = 'If an earlier upgrade attempt stalled, run Set-DistributionGroup -Identity <DL> -ResetMigrationToUnifiedGroup. Otherwise open a Microsoft support case.'
 }
@@ -116,7 +130,8 @@ function Format-Recipient {
 
 function Test-IdentityMatch {
     # True when any value of a (possibly multi-valued) property refers to the
-    # target group by DN, GUID or name. Used only by fallback scans.
+    # target group by any of $TargetIds (DN, GUID, name, display name or
+    # primary SMTP address). Used only by fallback scans.
     param($Value, [string[]]$TargetIds)
     foreach ($v in @($Value)) {
         if ($null -ne $v -and $TargetIds -contains "$v") { return $true }
@@ -128,6 +143,11 @@ function Invoke-FilteredQuery {
     # Runs an Exchange cmdlet with a server-side OPATH filter. If the tenant
     # rejects the property as unfilterable, warns and falls back to a full scan
     # filtered locally with $Fallback.
+    # $Fallback must be a plain scriptblock, not .GetNewClosure(): a closure
+    # runs in a new module scope that can't see this script's functions (such
+    # as Test-IdentityMatch) when the script is run from a prompt. A plain
+    # scriptblock reads the caller's variables (e.g. $ids) through the call
+    # stack, so this function must not define variables with those names.
     param(
         [Parameter(Mandatory)][string]$Command,
         [Parameter(Mandatory)][string]$Filter,
@@ -206,6 +226,39 @@ function Test-OwnerCount {
     }
 }
 
+function Test-OwnerType {
+    # Owners must be user mailboxes or mail users. Anything else, such as a
+    # shared mailbox, a group, or a user without a mailbox (which Get-Recipient
+    # can't find), is blocked. KB 4481100 doesn't list this rule; Microsoft's
+    # DLT365Groupsupgrade script does. Emits nothing when there are no owners;
+    # Test-OwnerCount already blocks that case.
+    param([AllowEmptyCollection()][string[]]$ManagedBy = @())
+    $owners = @($ManagedBy | Where-Object { $_ })
+    if (-not $owners.Count) { return }
+    $unsupported = foreach ($owner in $owners) {
+        try {
+            $r = Get-Recipient -Identity $owner -ErrorAction Stop
+        }
+        catch {
+            if ($_.Exception.Message -notmatch "couldn't be found") { throw }
+            "$owner [not a mail-enabled recipient]"
+            continue
+        }
+        if ($SupportedOwnerTypes -notcontains $r.RecipientTypeDetails) {
+            "$(Format-Recipient $r) [$($r.RecipientTypeDetails)]"
+        }
+    }
+    $unsupported = @($unsupported)
+    if ($unsupported.Count) {
+        New-Blocker 'Owner types' `
+            "Has $($unsupported.Count) owner(s) that aren't $($SupportedOwnerTypes -join ' or '). Replace them." 'Unsupported owner types' `
+            -Items $unsupported
+    }
+    else {
+        New-CheckResult 'Owner types' 'Pass' 'All owners are user mailboxes or mail users.'
+    }
+}
+
 function Test-Membership {
     param([AllowEmptyCollection()][object[]]$Members = @())
     $Members = @($Members | Where-Object { $_ })
@@ -246,7 +299,7 @@ function Test-ParentGroup {
     $fallback = {
         $members = Get-DistributionGroupMember -Identity $_.Guid.ToString() -ResultSize Unlimited -ErrorAction Stop
         Test-IdentityMatch -Value @($members | ForEach-Object { $_.DistinguishedName; $_.Guid }) -TargetIds $ids
-    }.GetNewClosure()
+    }
     $parents = @(Invoke-FilteredQuery -Command 'Get-DistributionGroup' `
             -Filter "Members -eq '$(ConvertTo-OpathLiteral $DistinguishedName)'" -Fallback $fallback)
     if ($parents.Count) {
@@ -259,14 +312,24 @@ function Test-ParentGroup {
 }
 
 function Test-SharedMailboxForwarding {
+    # Covers both forwarding settings: ForwardingAddress (a recipient, stored
+    # as a DN) and ForwardingSmtpAddress (any address, stored as 'smtp:...').
     param(
         [Parameter(Mandatory)][string]$DistinguishedName,
-        [string[]]$TargetIds = @()
+        [string[]]$TargetIds = @(),
+        [string[]]$SmtpAddresses = @()
     )
     $ids = @($DistinguishedName) + $TargetIds
-    $fallback = { Test-IdentityMatch -Value $_.ForwardingAddress -TargetIds $ids }.GetNewClosure()
+    $smtp = @($SmtpAddresses | Where-Object { $_ })
+    $fallback = {
+        (Test-IdentityMatch -Value $_.ForwardingAddress -TargetIds $ids) -or
+        ($smtp -contains ("$($_.ForwardingSmtpAddress)" -replace '^smtp:'))
+    }
+    $clauses = @("ForwardingAddress -eq '$(ConvertTo-OpathLiteral $DistinguishedName)'") +
+        @($smtp | ForEach-Object { "ForwardingSmtpAddress -eq '$(ConvertTo-OpathLiteral $_)'" })
+    $opath = if ($clauses.Count -gt 1) { ($clauses | ForEach-Object { "($_)" }) -join ' -or ' } else { $clauses[0] }
     $mailboxes = @(Invoke-FilteredQuery -Command 'Get-Mailbox' -Parameters @{ RecipientTypeDetails = 'SharedMailbox' } `
-            -Filter "ForwardingAddress -eq '$(ConvertTo-OpathLiteral $DistinguishedName)'" -Fallback $fallback)
+            -Filter $opath -Fallback $fallback)
     if ($mailboxes.Count) {
         New-Blocker 'Shared mailbox forwarding' "Is the forwarding address of $($mailboxes.Count) shared mailbox(es). Change their forwarding." 'Shared mailbox forwarding' `
             -Items ($mailboxes | ForEach-Object { Format-Recipient $_ })
@@ -283,7 +346,7 @@ function Test-SenderRestriction {
         [string[]]$TargetIds = @()
     )
     $ids = @($DistinguishedName, $Guid.ToString()) + $TargetIds
-    $fallback = { Test-IdentityMatch -Value $_.AcceptMessagesOnlyFromDLMembers -TargetIds $ids }.GetNewClosure()
+    $fallback = { Test-IdentityMatch -Value $_.AcceptMessagesOnlyFromDLMembers -TargetIds $ids }
     $groups = @(Invoke-FilteredQuery -Command 'Get-DistributionGroup' `
             -Filter "AcceptMessagesOnlyFromDLMembers -eq '$(ConvertTo-OpathLiteral $DistinguishedName)'" -Fallback $fallback |
             Where-Object { $_.Guid -ne $Guid })
@@ -294,6 +357,50 @@ function Test-SenderRestriction {
     }
     else {
         New-CheckResult 'Sender restriction in other DLs' 'Pass' 'Not used in any other distribution list''s sender restrictions.'
+    }
+}
+
+function Test-DuplicateRecipient {
+    # Not in KB 4481100; Microsoft's DLT365Groupsupgrade script checks it, so
+    # this is a warning, not a blocker. Soft-deleted recipients are returned
+    # only for -Identity lookups, not -Filter, so look up each value in turn.
+    param(
+        [Parameter(Mandatory)][guid]$Guid,
+        [Parameter(Mandatory)][string]$Alias,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$PrimarySmtpAddress
+    )
+    $lookups = [ordered]@{ alias = $Alias; name = $Name; 'email address' = $PrimarySmtpAddress }
+    $found = [ordered]@{}
+    foreach ($field in $lookups.Keys) {
+        try {
+            $matched = @(Get-Recipient -Identity $lookups[$field] -IncludeSoftDeletedRecipients -ResultSize Unlimited -ErrorAction Stop)
+        }
+        catch {
+            if ($_.Exception.Message -notmatch "couldn't be found") { throw }
+            continue
+        }
+        # -Identity also resolves other attributes, such as DisplayName, so
+        # keep only recipients whose own value for this field really matches.
+        $same = switch ($field) {
+            'alias' { { "$($_.Alias)" -eq $Alias } }
+            'name' { { "$($_.Name)" -eq $Name } }
+            'email address' { { @($_.EmailAddresses | ForEach-Object { "$_" -replace '^smtp:' }) -contains $PrimarySmtpAddress } }
+        }
+        foreach ($r in $matched | Where-Object { $_.Guid -ne $Guid } | Where-Object $same) {
+            $key = "$($r.Guid)"
+            if (-not $found.Contains($key)) { $found[$key] = @{ Recipient = $r; Fields = [System.Collections.Generic.List[string]]::new() } }
+            $found[$key].Fields.Add($field)
+        }
+    }
+    if ($found.Count) {
+        New-CheckResult 'Duplicate recipients' 'Warning' `
+            "$($found.Count) other recipient(s), possibly soft-deleted, share this list's alias, name or email address. Microsoft's troubleshooting script reports this as a blocker." `
+            -Guide 'Duplicate recipient' `
+            -Items ($found.Values | ForEach-Object { "$(Format-Recipient $_.Recipient) [$($_.Recipient.RecipientTypeDetails)] - same $($_.Fields -join ', ')" })
+    }
+    else {
+        New-CheckResult 'Duplicate recipients' 'Pass' 'No other recipient shares its alias, name or email address.'
     }
 }
 
@@ -363,17 +470,22 @@ function Get-DLUpgradeReadiness {
     $group = Get-DistributionGroup -Identity $recipient.Guid.ToString() -ErrorAction Stop
     $dn = $group.DistinguishedName
     $ids = @($group.Guid.ToString(), "$($group.Name)", "$($group.DisplayName)", "$($group.PrimarySmtpAddress)") | Where-Object { $_ }
+    $smtp = @($group.EmailAddresses | Where-Object { "$_" -match '^smtp:' } | ForEach-Object { "$_" -replace '^smtp:' })
 
     $results = [System.Collections.Generic.List[object]]::new()
     $results.Add($typeResult)
     $checks = [ordered]@{
         'Cloud managed'                     = { Test-DirSync -IsDirSynced ([bool]$group.IsDirSynced) }
         'Owners'                            = { Test-OwnerCount -ManagedBy @($group.ManagedBy | ForEach-Object { "$_" }) }
+        'Owner types'                       = { Test-OwnerType -ManagedBy @($group.ManagedBy | ForEach-Object { "$_" }) }
         'Members'                           = { Test-Membership -Members @(Get-DistributionGroupMember -Identity $group.Guid.ToString() -ResultSize Unlimited -ErrorAction Stop) }
         'Nested: member of other groups'    = { Test-ParentGroup -DistinguishedName $dn -TargetIds $ids }
-        'Shared mailbox forwarding'         = { Test-SharedMailboxForwarding -DistinguishedName $dn -TargetIds $ids }
+        'Shared mailbox forwarding'         = { Test-SharedMailboxForwarding -DistinguishedName $dn -TargetIds $ids -SmtpAddresses $smtp }
         'Sender restriction in other DLs'   = { Test-SenderRestriction -DistinguishedName $dn -Guid $group.Guid -TargetIds $ids }
         'Alias characters'                  = { Test-AliasCharacter -Alias $group.Alias }
+        'Duplicate recipients'              = {
+            Test-DuplicateRecipient -Guid $group.Guid -Alias $group.Alias -Name $group.Name -PrimarySmtpAddress "$($group.PrimarySmtpAddress)"
+        }
         'Tenant: group email address policy' = { Test-GroupEmailAddressPolicy }
     }
     foreach ($name in $checks.Keys) {
@@ -434,6 +546,25 @@ function Write-CheckReport {
     Write-Host ''
 }
 
+function Export-CheckReport {
+    # Writes results to CSV, one row per check. Items are joined into one cell;
+    # piping the raw objects to Export-Csv would show them as System.String[].
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'Console confirmation alongside the colored report.')]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)]$Recipient,
+        [Parameter(Mandatory)][object[]]$Results
+    )
+    # A BOM lets Excel open non-ASCII names correctly; only 'utf8BOM' adds one in PowerShell 7.
+    $encoding = if ($PSVersionTable.PSVersion.Major -ge 6) { 'utf8BOM' } else { 'UTF8' }
+    $list = "$($Recipient.PrimarySmtpAddress)"
+    $Results | Select-Object @{ n = 'DistributionList'; e = { $list } },
+        Check, Status, Detail, @{ n = 'Items'; e = { $_.Items -join '; ' } }, Resolution, Guide |
+        Export-Csv -Path $Path -NoTypeInformation -Encoding $encoding -ErrorAction Stop
+    Write-Host "Report saved to $((Resolve-Path -LiteralPath $Path).Path)" -ForegroundColor Gray
+    Write-Host ''
+}
+
 # --- Main (skipped when dot-sourced, e.g. by the Pester tests) ---
 if ($MyInvocation.InvocationName -ne '.') {
     # Checked at runtime, not with #Requires, so tests can dot-source without the module.
@@ -452,6 +583,7 @@ if ($MyInvocation.InvocationName -ne '.') {
         $recipient = Get-Recipient -Identity $Identity -ErrorAction Stop
         $results = @(Get-DLUpgradeReadiness -Identity $recipient.Guid.ToString())
         Write-CheckReport -Recipient $recipient -Results $results
+        if ($CsvPath) { Export-CheckReport -Path $CsvPath -Recipient $recipient -Results $results }
         # Emit objects only when a caller consumes them; a bare run shows just the report.
         if ($PassThru -or $MyInvocation.PipelinePosition -lt $MyInvocation.PipelineLength) {
             $results

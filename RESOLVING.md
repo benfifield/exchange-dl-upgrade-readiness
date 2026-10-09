@@ -209,6 +209,31 @@ other owners.
 Set-DistributionGroup -Identity '<DL>' -ManagedBy @{Remove='<owner1>','<owner2>'}
 ```
 
+## Unsupported owner types
+
+**Why:** A Microsoft 365 group's owners must be user mailboxes or mail users.
+One or more owners of this list (listed in the script's output) are something
+else, such as a shared mailbox, a group, or a user with no mailbox. Microsoft's
+[DLT365Groupsupgrade troubleshooting script](https://microsoft.github.io/CSS-Exchange/M365/DLT365Groupsupgrade/)
+reports this as a blocker.
+
+**Fix:** If none of the current owners is supported, add a user mailbox or
+mail user as owner first, so the list is never left without one. Then remove
+each owner listed.
+
+```powershell
+Set-DistributionGroup -Identity '<DL>' -ManagedBy @{Add='<supported owner>'}
+Set-DistributionGroup -Identity '<DL>' -ManagedBy @{Remove='<owner>'}
+```
+
+An owner shown as "not a mail-enabled recipient" is usually a user whose
+mailbox or licence was removed. Either give them a mailbox again or remove them
+as owner.
+
+**Watch out:** People removed as owners can no longer manage the list's
+membership. If the owner was a group, add the people who should manage the
+list as owners individually.
+
 ## No members
 
 **Why:** A list with no members can't be upgraded.
@@ -298,13 +323,15 @@ directly.
 ## Shared mailbox forwarding
 
 **Why:** One or more shared mailboxes (listed in the script's output) forward
-their mail to this list.
+their mail to this list, through either `ForwardingAddress` or
+`ForwardingSmtpAddress`.
 
 **Fix:** Record each mailbox's forwarding settings, then clear forwarding.
+Clearing both settings is harmless if only one was set.
 
 ```powershell
-Get-Mailbox -Identity '<shared mailbox>' | Format-List ForwardingAddress, DeliverToMailboxAndForward
-Set-Mailbox -Identity '<shared mailbox>' -ForwardingAddress $null
+Get-Mailbox -Identity '<shared mailbox>' | Format-List ForwardingAddress, ForwardingSmtpAddress, DeliverToMailboxAndForward
+Set-Mailbox -Identity '<shared mailbox>' -ForwardingAddress $null -ForwardingSmtpAddress $null
 ```
 
 After the upgrade, set forwarding again if it's still needed:
@@ -361,6 +388,39 @@ Set-DistributionGroup -Identity '<DL>' -Alias '<new-alias>'
 **Watch out:** Changing the alias doesn't change the list's email addresses.
 Check them with `(Get-DistributionGroup '<DL>').EmailAddresses`. The new alias
 must not already be used by another recipient.
+
+## Duplicate recipient
+
+**Why:** Another recipient (listed in the script's output) has the same alias,
+name or primary email address as this list. It may be a soft-deleted object,
+such as a deleted mailbox or Microsoft 365 group that can still be restored.
+KB 4481100 doesn't list this, so the script reports it as `WARN`, not
+`BLOCKED`. Microsoft's
+[DLT365Groupsupgrade troubleshooting script](https://microsoft.github.io/CSS-Exchange/M365/DLT365Groupsupgrade/)
+does report it as a blocker, and the upgrade creates a new group with the
+list's alias and address, so a clash is a likely cause of a failed upgrade.
+
+**Fix:** Look at each recipient listed and decide whether it's still needed.
+
+```powershell
+Get-Recipient -Identity '<alias, name or address>' -IncludeSoftDeletedRecipients |
+    Format-Table DisplayName, Alias, PrimarySmtpAddress, RecipientTypeDetails, Guid
+```
+
+- **Still needed:** change its alias or email address so it no longer matches
+  the list.
+- **Soft-deleted and not needed:** permanently delete it. For a mailbox, find
+  it with `Get-Mailbox -SoftDeletedMailbox -Identity '<guid>'`, then run
+  `Remove-Mailbox -Identity '<guid>' -PermanentlyDelete`. For a Microsoft 365
+  group, permanently delete it from **Deleted groups** in the Microsoft 365
+  admin center or the Microsoft Entra admin center.
+
+Re-run the script afterward. A permanently deleted object can take a while to
+disappear from `Get-Recipient`.
+
+**Watch out:** Permanent deletion can't be undone. The mailbox's or group's
+content is gone for good. If you aren't sure, restore the object instead and
+rename it.
 
 ## Email address policy
 
