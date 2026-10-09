@@ -389,6 +389,39 @@ Set-DistributionGroup -Identity '<DL>' -Alias '<new-alias>'
 Check them with `(Get-DistributionGroup '<DL>').EmailAddresses`. The new alias
 must not already be used by another recipient.
 
+## Duplicate recipient
+
+**Why:** Another recipient (listed in the script's output) has the same alias,
+name or primary email address as this list. It may be a soft-deleted object,
+such as a deleted mailbox or Microsoft 365 group that can still be restored.
+KB 4481100 doesn't list this, so the script reports it as `WARN`, not
+`BLOCKED`. Microsoft's
+[DLT365Groupsupgrade troubleshooting script](https://microsoft.github.io/CSS-Exchange/M365/DLT365Groupsupgrade/)
+does report it as a blocker, and the upgrade creates a new group with the
+list's alias and address, so a clash is a likely cause of a failed upgrade.
+
+**Fix:** Look at each recipient listed and decide whether it's still needed.
+
+```powershell
+Get-Recipient -Identity '<alias, name or address>' -IncludeSoftDeletedRecipients |
+    Format-Table DisplayName, Alias, PrimarySmtpAddress, RecipientTypeDetails, Guid
+```
+
+- **Still needed:** change its alias or email address so it no longer matches
+  the list.
+- **Soft-deleted and not needed:** permanently delete it. For a mailbox, find
+  it with `Get-Mailbox -SoftDeletedMailbox -Identity '<guid>'`, then run
+  `Remove-Mailbox -Identity '<guid>' -PermanentlyDelete`. For a Microsoft 365
+  group, permanently delete it from **Deleted groups** in the Microsoft 365
+  admin center or the Microsoft Entra admin center.
+
+Re-run the script afterward. A permanently deleted object can take a while to
+disappear from `Get-Recipient`.
+
+**Watch out:** Permanent deletion can't be undone. The mailbox's or group's
+content is gone for good. If you aren't sure, restore the object instead and
+rename it.
+
 ## Email address policy
 
 **Why:** The tenant has a custom email address policy for Microsoft 365

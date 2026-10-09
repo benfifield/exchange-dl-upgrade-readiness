@@ -9,6 +9,10 @@ and published on the repository's Releases page.
 - New check, **Owner types**: blocks when an owner isn't a user mailbox or
   mail user, for example a shared mailbox, a group or a user without a
   mailbox. Microsoft's DLT365Groupsupgrade script checks this too.
+- New check, **Duplicate recipients**: warns when another recipient,
+  including a soft-deleted one, has the same alias, name or primary email
+  address as the list. It's a warning because KB 4481100 doesn't list it;
+  Microsoft's DLT365Groupsupgrade script reports it as a blocker.
 - The shared mailbox forwarding check now also catches mailboxes that
   forward to any of the list's SMTP addresses through
   `ForwardingSmtpAddress`, not just through `ForwardingAddress`.

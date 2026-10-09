@@ -8,7 +8,7 @@ BeforeDiscovery {
 
 BeforeAll {
     # Stub Exchange Online cmdlets so tests run without the module or a tenant.
-    function Get-Recipient { param($Identity, $Filter, $ResultSize, $ErrorAction) }
+    function Get-Recipient { param($Identity, $Filter, $ResultSize, [switch]$IncludeSoftDeletedRecipients, $ErrorAction) }
     function Get-DistributionGroup { param($Identity, $Filter, $ResultSize, $ErrorAction) }
     function Get-DistributionGroupMember { param($Identity, $ResultSize, $ErrorAction) }
     function Get-Mailbox { param($RecipientTypeDetails, $Filter, $ResultSize, $ErrorAction) }
@@ -277,6 +277,47 @@ Describe 'Test-AliasCharacter' {
         $r = Test-AliasCharacter -Alias $Alias
         $r.Status | Should -Be 'Blocked'
         $r.Items -join '' | Should -BeLike "*$Bad*"
+    }
+}
+
+Describe 'Test-DuplicateRecipient' {
+    BeforeAll {
+        $script:Self = [pscustomobject]@{ DisplayName = 'Sales'; PrimarySmtpAddress = 'sales@contoso.com'; RecipientTypeDetails = 'MailUniversalDistributionGroup'; Guid = $script:Guid }
+        $script:Dup = [pscustomobject]@{ DisplayName = 'Old Sales'; PrimarySmtpAddress = 'oldsales@contoso.com'; RecipientTypeDetails = 'UserMailbox'; Guid = [guid]'44444444-4444-4444-4444-444444444444' }
+        function Invoke-DuplicateTest {
+            Test-DuplicateRecipient -Guid $script:Guid -Alias 'sales' -Name 'Sales' -PrimarySmtpAddress 'sales@contoso.com'
+        }
+    }
+    It 'passes when only the group itself matches' {
+        Mock Get-Recipient { $script:Self }
+        (Invoke-DuplicateTest).Status | Should -Be 'Pass'
+    }
+    It 'warns when another recipient shares the alias, and says which value clashed' {
+        Mock Get-Recipient { $script:Self; if ($Identity -eq 'sales') { $script:Dup } }
+        $r = Invoke-DuplicateTest
+        $r.Status | Should -Be 'Warning'
+        $r.Items | Should -HaveCount 1
+        $r.Items[0] | Should -Match 'Old Sales.*UserMailbox.*alias'
+        $r.Resolution | Should -Not -BeNullOrEmpty
+    }
+    It 'lists a recipient once even if it matches several values' {
+        Mock Get-Recipient { $script:Self; $script:Dup }
+        $r = Invoke-DuplicateTest
+        $r.Items | Should -HaveCount 1
+        $r.Items[0] | Should -Match 'alias, name, email address'
+    }
+    It 'includes soft-deleted recipients' {
+        Mock Get-Recipient { $script:Self }
+        Invoke-DuplicateTest | Out-Null
+        Should -Invoke Get-Recipient -Times 3 -Exactly -ParameterFilter { $IncludeSoftDeletedRecipients }
+    }
+    It 'treats a value that matches nothing as no duplicate' {
+        Mock Get-Recipient { throw "The operation couldn't be performed because object '$Identity' couldn't be found on 'NAMPR01A001.PROD.OUTLOOK.COM'." }
+        (Invoke-DuplicateTest).Status | Should -Be 'Pass'
+    }
+    It 'rethrows other lookup errors' {
+        Mock Get-Recipient { throw 'access denied' }
+        { Invoke-DuplicateTest } | Should -Throw '*access denied*'
     }
 }
 

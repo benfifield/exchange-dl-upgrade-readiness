@@ -69,6 +69,7 @@ $Resolutions = [ordered]@{
     'Shared mailbox forwarding'  = 'Set-Mailbox -Identity <shared mailbox> -ForwardingAddress $null -ForwardingSmtpAddress $null for each mailbox listed. Re-point forwarding after the upgrade.'
     'Sender restriction'         = 'Set-DistributionGroup -Identity <other DL> -AcceptMessagesOnlyFromDLMembers @{Remove="<DL>"} for each DL listed.'
     'Alias special characters'   = 'Set-DistributionGroup -Identity <DL> -Alias <new alias using only letters, digits, . - _>'
+    'Duplicate recipient'        = 'Find each recipient listed with Get-Recipient -Identity <value> -IncludeSoftDeletedRecipients. Change its alias or address, or permanently delete it if it''s soft-deleted and no longer needed.'
     'Email address policy'       = 'Record the policy settings, then Remove-EmailAddressPolicy -Identity <policy>. Affects the whole tenant.'
     'Undocumented block'         = 'If an earlier upgrade attempt stalled, run Set-DistributionGroup -Identity <DL> -ResetMigrationToUnifiedGroup. Otherwise open a Microsoft support case.'
 }
@@ -345,6 +346,43 @@ function Test-SenderRestriction {
     }
 }
 
+function Test-DuplicateRecipient {
+    # Not in KB 4481100; Microsoft's DLT365Groupsupgrade script checks it, so
+    # this is a warning, not a blocker. Soft-deleted recipients are returned
+    # only for -Identity lookups, not -Filter, so look up each value in turn.
+    param(
+        [Parameter(Mandatory)][guid]$Guid,
+        [Parameter(Mandatory)][string]$Alias,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$PrimarySmtpAddress
+    )
+    $lookups = [ordered]@{ alias = $Alias; name = $Name; 'email address' = $PrimarySmtpAddress }
+    $found = [ordered]@{}
+    foreach ($field in $lookups.Keys) {
+        try {
+            $matched = @(Get-Recipient -Identity $lookups[$field] -IncludeSoftDeletedRecipients -ResultSize Unlimited -ErrorAction Stop)
+        }
+        catch {
+            if ($_.Exception.Message -notmatch "couldn't be found") { throw }
+            continue
+        }
+        foreach ($r in $matched | Where-Object { $_.Guid -ne $Guid }) {
+            $key = "$($r.Guid)"
+            if (-not $found.Contains($key)) { $found[$key] = @{ Recipient = $r; Fields = [System.Collections.Generic.List[string]]::new() } }
+            $found[$key].Fields.Add($field)
+        }
+    }
+    if ($found.Count) {
+        New-CheckResult 'Duplicate recipients' 'Warning' `
+            "$($found.Count) other recipient(s), possibly soft-deleted, share this list's alias, name or email address. Microsoft's troubleshooting script reports this as a blocker." `
+            -Guide 'Duplicate recipient' `
+            -Items ($found.Values | ForEach-Object { "$(Format-Recipient $_.Recipient) [$($_.Recipient.RecipientTypeDetails)] - same $($_.Fields -join ', ')" })
+    }
+    else {
+        New-CheckResult 'Duplicate recipients' 'Pass' 'No other recipient shares its alias, name or email address.'
+    }
+}
+
 function Test-AliasCharacter {
     param([Parameter(Mandatory)][string]$Alias)
     $bad = @($Alias.ToCharArray() | Where-Object { "$_" -cnotmatch '^[A-Za-z0-9._-]$' } | Select-Object -Unique)
@@ -424,6 +462,9 @@ function Get-DLUpgradeReadiness {
         'Shared mailbox forwarding'         = { Test-SharedMailboxForwarding -DistinguishedName $dn -TargetIds $ids -SmtpAddresses $smtp }
         'Sender restriction in other DLs'   = { Test-SenderRestriction -DistinguishedName $dn -Guid $group.Guid -TargetIds $ids }
         'Alias characters'                  = { Test-AliasCharacter -Alias $group.Alias }
+        'Duplicate recipients'              = {
+            Test-DuplicateRecipient -Guid $group.Guid -Alias $group.Alias -Name $group.Name -PrimarySmtpAddress "$($group.PrimarySmtpAddress)"
+        }
         'Tenant: group email address policy' = { Test-GroupEmailAddressPolicy }
     }
     foreach ($name in $checks.Keys) {
