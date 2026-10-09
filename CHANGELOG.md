@@ -9,6 +9,11 @@ and published on the repository's Releases page.
 - New check, **Owner types**: blocks when an owner isn't a user mailbox or
   mail user, for example a shared mailbox, a group or a user without a
   mailbox. Microsoft's DLT365Groupsupgrade script checks this too.
+- Fixed: when a tenant rejected a server-side filter, the "falling back to a
+  full scan" path failed with `The term 'Test-IdentityMatch' is not
+  recognized` and the check was reported as `ERROR`. This affected the
+  parent group, shared mailbox forwarding and sender restriction checks when
+  the script was run from a PowerShell prompt.
 
 ## 1.1.1 - 2026-10-07
 

@@ -179,6 +179,21 @@ Describe 'Test-ParentGroup' {
         $r.Items[0] | Should -Match 'All Staff'
         Should -Invoke Get-DistributionGroup -ParameterFilter { $Filter -like 'Members -eq *' }
     }
+    It 'finds parent groups in the fallback scan' {
+        # Regression: fallbacks built with .GetNewClosure() couldn't call Test-IdentityMatch.
+        Mock Get-DistributionGroup { throw "'Members' is not a recognized filterable property." } -ParameterFilter { $Filter }
+        $allStaff = [guid]'22222222-2222-2222-2222-222222222222'
+        Mock Get-DistributionGroup { @(
+            [pscustomobject]@{ DisplayName = 'All Staff'; PrimarySmtpAddress = 'all@contoso.com'; Guid = $allStaff }
+            [pscustomobject]@{ DisplayName = 'Unrelated'; PrimarySmtpAddress = 'other@contoso.com'; Guid = [guid]'33333333-3333-3333-3333-333333333333' }
+        ) } -ParameterFilter { -not $Filter }
+        Mock Get-DistributionGroupMember { [pscustomobject]@{ DistinguishedName = $script:Dn; Guid = $script:Guid } } -ParameterFilter { $Identity -eq $allStaff.ToString() }
+        Mock Get-DistributionGroupMember { [pscustomobject]@{ DistinguishedName = 'CN=Someone'; Guid = [guid]::NewGuid() } } -ParameterFilter { $Identity -ne $allStaff.ToString() }
+        $r = Test-ParentGroup -DistinguishedName $script:Dn -WarningAction SilentlyContinue
+        $r.Status | Should -Be 'Blocked'
+        $r.Items | Should -HaveCount 1
+        $r.Items[0] | Should -Match 'All Staff'
+    }
     It 'passes when no parent groups exist' {
         Mock Get-DistributionGroup { }
         (Test-ParentGroup -DistinguishedName $script:Dn).Status | Should -Be 'Pass'
@@ -206,6 +221,17 @@ Describe 'Test-SenderRestriction' {
         $r.Status | Should -Be 'Blocked'
         $r.Items[0] | Should -Match 'Execs'
         Should -Invoke Get-DistributionGroup -ParameterFilter { $Filter -like 'AcceptMessagesOnlyFromDLMembers -eq *' }
+    }
+    It 'finds restricting DLs in the fallback scan' {
+        Mock Get-DistributionGroup { throw "'AcceptMessagesOnlyFromDLMembers' is not a recognized filterable property." } -ParameterFilter { $Filter }
+        Mock Get-DistributionGroup { @(
+            [pscustomobject]@{ DisplayName = 'Execs'; PrimarySmtpAddress = 'execs@contoso.com'; Guid = [guid]::NewGuid(); AcceptMessagesOnlyFromDLMembers = @($script:Dn) }
+            [pscustomobject]@{ DisplayName = 'Open'; PrimarySmtpAddress = 'open@contoso.com'; Guid = [guid]::NewGuid(); AcceptMessagesOnlyFromDLMembers = @() }
+        ) } -ParameterFilter { -not $Filter }
+        $r = Test-SenderRestriction -DistinguishedName $script:Dn -Guid $script:Guid -WarningAction SilentlyContinue
+        $r.Status | Should -Be 'Blocked'
+        $r.Items | Should -HaveCount 1
+        $r.Items[0] | Should -Match 'Execs'
     }
     It 'ignores the group restricting itself' {
         Mock Get-DistributionGroup { @([pscustomobject]@{ DisplayName = 'Sales'; PrimarySmtpAddress = 'sales@contoso.com'; Guid = $script:Guid }) }

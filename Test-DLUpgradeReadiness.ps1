@@ -130,6 +130,11 @@ function Invoke-FilteredQuery {
     # Runs an Exchange cmdlet with a server-side OPATH filter. If the tenant
     # rejects the property as unfilterable, warns and falls back to a full scan
     # filtered locally with $Fallback.
+    # $Fallback must be a plain scriptblock, not .GetNewClosure(): a closure
+    # runs in a new module scope that can't see this script's functions (such
+    # as Test-IdentityMatch) when the script is run from a prompt. A plain
+    # scriptblock reads the caller's variables (e.g. $ids) through the call
+    # stack, so this function must not define variables with those names.
     param(
         [Parameter(Mandatory)][string]$Command,
         [Parameter(Mandatory)][string]$Filter,
@@ -279,7 +284,7 @@ function Test-ParentGroup {
     $fallback = {
         $members = Get-DistributionGroupMember -Identity $_.Guid.ToString() -ResultSize Unlimited -ErrorAction Stop
         Test-IdentityMatch -Value @($members | ForEach-Object { $_.DistinguishedName; $_.Guid }) -TargetIds $ids
-    }.GetNewClosure()
+    }
     $parents = @(Invoke-FilteredQuery -Command 'Get-DistributionGroup' `
             -Filter "Members -eq '$(ConvertTo-OpathLiteral $DistinguishedName)'" -Fallback $fallback)
     if ($parents.Count) {
@@ -297,7 +302,7 @@ function Test-SharedMailboxForwarding {
         [string[]]$TargetIds = @()
     )
     $ids = @($DistinguishedName) + $TargetIds
-    $fallback = { Test-IdentityMatch -Value $_.ForwardingAddress -TargetIds $ids }.GetNewClosure()
+    $fallback = { Test-IdentityMatch -Value $_.ForwardingAddress -TargetIds $ids }
     $mailboxes = @(Invoke-FilteredQuery -Command 'Get-Mailbox' -Parameters @{ RecipientTypeDetails = 'SharedMailbox' } `
             -Filter "ForwardingAddress -eq '$(ConvertTo-OpathLiteral $DistinguishedName)'" -Fallback $fallback)
     if ($mailboxes.Count) {
@@ -316,7 +321,7 @@ function Test-SenderRestriction {
         [string[]]$TargetIds = @()
     )
     $ids = @($DistinguishedName, $Guid.ToString()) + $TargetIds
-    $fallback = { Test-IdentityMatch -Value $_.AcceptMessagesOnlyFromDLMembers -TargetIds $ids }.GetNewClosure()
+    $fallback = { Test-IdentityMatch -Value $_.AcceptMessagesOnlyFromDLMembers -TargetIds $ids }
     $groups = @(Invoke-FilteredQuery -Command 'Get-DistributionGroup' `
             -Filter "AcceptMessagesOnlyFromDLMembers -eq '$(ConvertTo-OpathLiteral $DistinguishedName)'" -Fallback $fallback |
             Where-Object { $_.Guid -ne $Guid })
