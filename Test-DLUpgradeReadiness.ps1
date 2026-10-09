@@ -6,7 +6,9 @@
     Evaluates one distribution list against every upgrade blocker documented in
     Microsoft KB 4481100 ("Can't upgrade distribution lists to Microsoft 365
     Groups") and prints each blocker found, naming the offending members, groups,
-    mailboxes or policies. Also runs Microsoft's own
+    mailboxes or policies. Also checks owner types and duplicate recipients,
+    which Microsoft's DLT365Groupsupgrade troubleshooting script reports but
+    the KB doesn't list, and runs Microsoft's own
     Get-EligibleDistributionGroupForMigration as a cross-check.
 
     The script is read-only. It signs in to Exchange Online interactively if no
@@ -128,7 +130,8 @@ function Format-Recipient {
 
 function Test-IdentityMatch {
     # True when any value of a (possibly multi-valued) property refers to the
-    # target group by DN, GUID or name. Used only by fallback scans.
+    # target group by any of $TargetIds (DN, GUID, name, display name or
+    # primary SMTP address). Used only by fallback scans.
     param($Value, [string[]]$TargetIds)
     foreach ($v in @($Value)) {
         if ($null -ne $v -and $TargetIds -contains "$v") { return $true }
@@ -224,8 +227,10 @@ function Test-OwnerCount {
 }
 
 function Test-OwnerType {
-    # Owners with no recipient object (for example, users without a mailbox)
-    # can't own a Microsoft 365 group. Emits nothing when there are no owners;
+    # Owners must be user mailboxes or mail users. Anything else, such as a
+    # shared mailbox, a group, or a user without a mailbox (which Get-Recipient
+    # can't find), is blocked. KB 4481100 doesn't list this rule; Microsoft's
+    # DLT365Groupsupgrade script does. Emits nothing when there are no owners;
     # Test-OwnerCount already blocks that case.
     param([AllowEmptyCollection()][string[]]$ManagedBy = @())
     $owners = @($ManagedBy | Where-Object { $_ })

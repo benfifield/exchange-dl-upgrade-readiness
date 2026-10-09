@@ -6,6 +6,9 @@ Explains **why** a distribution list (DL) can't be upgraded to a Microsoft 365
 group. The script checks one DL against every blocker in Microsoft KB 4481100,
 [Can't upgrade distribution lists to Microsoft 365 Groups](https://learn.microsoft.com/troubleshoot/exchange/groups-and-distribution-lists/cannot-upgrade-distribution-lists-to-office-365-groups),
 and names the members, groups, mailboxes or policies causing each blocker.
+It also runs two checks that only Microsoft's own troubleshooting script
+reports, owner types and duplicate recipients. See
+[Microsoft's troubleshooting script](#microsofts-troubleshooting-script).
 
 The script is read-only. It changes nothing in the tenant. See
 [SECURITY.md](SECURITY.md) for details.
@@ -170,10 +173,11 @@ This script aims to be easier to use and act on:
 - **Faster in large tenants.** It finds parent groups, sender restrictions
   and forwarding with server-side filters. Microsoft's script reads the
   membership of every distribution list in the tenant.
-- **Fewer false results.** It matches objects exactly by distinguished name
-  or GUID, where Microsoft's script matches names as text, so a list named
-  `Sales` can also match `Sales-EU`. A check that can't run is reported as
-  `ERROR` instead of looking like a pass.
+- **Fewer false results.** Its server-side filters match the list by
+  distinguished name, and its other lookups compare whole values. Microsoft's
+  script matches names as text patterns, so a list named `Sales` can also
+  match `Sales-EU`. A check that can't run is reported as `ERROR` instead of
+  looking like a pass.
 - **More checks.** It also checks for lists with no members, special
   characters in the alias, and runs Microsoft's own
   `Get-EligibleDistributionGroupForMigration` as a cross-check.
