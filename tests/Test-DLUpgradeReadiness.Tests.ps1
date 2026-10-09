@@ -282,8 +282,16 @@ Describe 'Test-AliasCharacter' {
 
 Describe 'Test-DuplicateRecipient' {
     BeforeAll {
-        $script:Self = [pscustomobject]@{ DisplayName = 'Sales'; PrimarySmtpAddress = 'sales@contoso.com'; RecipientTypeDetails = 'MailUniversalDistributionGroup'; Guid = $script:Guid }
-        $script:Dup = [pscustomobject]@{ DisplayName = 'Old Sales'; PrimarySmtpAddress = 'oldsales@contoso.com'; RecipientTypeDetails = 'UserMailbox'; Guid = [guid]'44444444-4444-4444-4444-444444444444' }
+        $script:Self = [pscustomobject]@{
+            DisplayName = 'Sales'; Name = 'Sales'; Alias = 'sales'; PrimarySmtpAddress = 'sales@contoso.com'
+            EmailAddresses = @('SMTP:sales@contoso.com'); RecipientTypeDetails = 'MailUniversalDistributionGroup'; Guid = $script:Guid
+        }
+        # Shares every value; mocks below decide which lookups return it.
+        $script:Dup = [pscustomobject]@{
+            DisplayName = 'Old Sales'; Name = 'Sales'; Alias = 'SALES'; PrimarySmtpAddress = 'oldsales@contoso.com'
+            EmailAddresses = @('SMTP:oldsales@contoso.com', 'smtp:Sales@Contoso.com'); RecipientTypeDetails = 'UserMailbox'
+            Guid = [guid]'44444444-4444-4444-4444-444444444444'
+        }
         function Invoke-DuplicateTest {
             Test-DuplicateRecipient -Guid $script:Guid -Alias 'sales' -Name 'Sales' -PrimarySmtpAddress 'sales@contoso.com'
         }
@@ -305,6 +313,15 @@ Describe 'Test-DuplicateRecipient' {
         $r = Invoke-DuplicateTest
         $r.Items | Should -HaveCount 1
         $r.Items[0] | Should -Match 'alias, name, email address'
+    }
+    It 'ignores a recipient whose display name matches the list''s name' {
+        # -Identity also resolves display names, which don't need to be unique.
+        $other = [pscustomobject]@{
+            DisplayName = 'Sales'; Name = 'Sales Archive'; Alias = 'salesarchive'; PrimarySmtpAddress = 'salesarchive@contoso.com'
+            EmailAddresses = @('SMTP:salesarchive@contoso.com'); RecipientTypeDetails = 'MailUniversalDistributionGroup'; Guid = [guid]::NewGuid()
+        }
+        Mock Get-Recipient { $script:Self; if ($Identity -eq 'Sales') { $other } }
+        (Invoke-DuplicateTest).Status | Should -Be 'Pass'
     }
     It 'includes soft-deleted recipients' {
         Mock Get-Recipient { $script:Self }

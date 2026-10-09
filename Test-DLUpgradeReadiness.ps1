@@ -375,7 +375,14 @@ function Test-DuplicateRecipient {
             if ($_.Exception.Message -notmatch "couldn't be found") { throw }
             continue
         }
-        foreach ($r in $matched | Where-Object { $_.Guid -ne $Guid }) {
+        # -Identity also resolves other attributes, such as DisplayName, so
+        # keep only recipients whose own value for this field really matches.
+        $same = switch ($field) {
+            'alias' { { "$($_.Alias)" -eq $Alias } }
+            'name' { { "$($_.Name)" -eq $Name } }
+            'email address' { { @($_.EmailAddresses | ForEach-Object { "$_" -replace '^smtp:' }) -contains $PrimarySmtpAddress } }
+        }
+        foreach ($r in $matched | Where-Object { $_.Guid -ne $Guid } | Where-Object $same) {
             $key = "$($r.Guid)"
             if (-not $found.Contains($key)) { $found[$key] = @{ Recipient = $r; Fields = [System.Collections.Generic.List[string]]::new() } }
             $found[$key].Fields.Add($field)
