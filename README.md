@@ -127,7 +127,7 @@ job can fail without reporting an error. If that happens, see
 | Nested: child groups | A member is itself a group. | [Child groups](RESOLVING.md#child-groups) |
 | Member types | A member isn't `UserMailbox`, `SharedMailbox`, `TeamMailbox` or `MailUser`. | [Unsupported member types](RESOLVING.md#unsupported-member-types) |
 | Nested: member of other groups | The group is a member of another group. | [Member of other groups](RESOLVING.md#member-of-other-groups) |
-| Shared mailbox forwarding | A shared mailbox forwards to the group. | [Shared mailbox forwarding](RESOLVING.md#shared-mailbox-forwarding) |
+| Shared mailbox forwarding | A shared mailbox forwards to the group, through `ForwardingAddress` or `ForwardingSmtpAddress` (any of the group's SMTP addresses). | [Shared mailbox forwarding](RESOLVING.md#shared-mailbox-forwarding) |
 | Sender restriction in other DLs | Another DL accepts mail only from this group's members. | [Sender restriction](RESOLVING.md#sender-restriction) |
 | Alias characters | The alias contains characters other than letters, digits, `.`, `-` and `_`. Microsoft's article says only "special characters" without listing them, so this allowed set is an inference and may be stricter or looser than Microsoft's actual rule. | [Alias special characters](RESOLVING.md#alias-special-characters) |
 | Tenant: group email address policy | A custom email address policy targets Microsoft 365 groups. This check covers the whole tenant and blocks every DL. | [Email address policy](RESOLVING.md#email-address-policy) |

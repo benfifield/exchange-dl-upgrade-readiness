@@ -66,7 +66,7 @@ $Resolutions = [ordered]@{
     'Child groups'               = 'Add the child group''s members directly, then Remove-DistributionGroupMember -Identity <DL> -Member <child group>'
     'Unsupported member types'   = 'Remove-DistributionGroupMember -Identity <DL> -Member <member>. Re-add external people as guests after the upgrade.'
     'Member of other groups'     = 'Remove-DistributionGroupMember -Identity <parent group> -Member <DL> for each parent listed.'
-    'Shared mailbox forwarding'  = 'Set-Mailbox -Identity <shared mailbox> -ForwardingAddress $null for each mailbox listed. Re-point forwarding after the upgrade.'
+    'Shared mailbox forwarding'  = 'Set-Mailbox -Identity <shared mailbox> -ForwardingAddress $null -ForwardingSmtpAddress $null for each mailbox listed. Re-point forwarding after the upgrade.'
     'Sender restriction'         = 'Set-DistributionGroup -Identity <other DL> -AcceptMessagesOnlyFromDLMembers @{Remove="<DL>"} for each DL listed.'
     'Alias special characters'   = 'Set-DistributionGroup -Identity <DL> -Alias <new alias using only letters, digits, . - _>'
     'Email address policy'       = 'Record the policy settings, then Remove-EmailAddressPolicy -Identity <policy>. Affects the whole tenant.'
@@ -297,14 +297,24 @@ function Test-ParentGroup {
 }
 
 function Test-SharedMailboxForwarding {
+    # Covers both forwarding settings: ForwardingAddress (a recipient, stored
+    # as a DN) and ForwardingSmtpAddress (any address, stored as 'smtp:...').
     param(
         [Parameter(Mandatory)][string]$DistinguishedName,
-        [string[]]$TargetIds = @()
+        [string[]]$TargetIds = @(),
+        [string[]]$SmtpAddresses = @()
     )
     $ids = @($DistinguishedName) + $TargetIds
-    $fallback = { Test-IdentityMatch -Value $_.ForwardingAddress -TargetIds $ids }
+    $smtp = @($SmtpAddresses | Where-Object { $_ })
+    $fallback = {
+        (Test-IdentityMatch -Value $_.ForwardingAddress -TargetIds $ids) -or
+        ($smtp -contains ("$($_.ForwardingSmtpAddress)" -replace '^smtp:'))
+    }
+    $clauses = @("ForwardingAddress -eq '$(ConvertTo-OpathLiteral $DistinguishedName)'") +
+        @($smtp | ForEach-Object { "ForwardingSmtpAddress -eq '$(ConvertTo-OpathLiteral $_)'" })
+    $opath = if ($clauses.Count -gt 1) { ($clauses | ForEach-Object { "($_)" }) -join ' -or ' } else { $clauses[0] }
     $mailboxes = @(Invoke-FilteredQuery -Command 'Get-Mailbox' -Parameters @{ RecipientTypeDetails = 'SharedMailbox' } `
-            -Filter "ForwardingAddress -eq '$(ConvertTo-OpathLiteral $DistinguishedName)'" -Fallback $fallback)
+            -Filter $opath -Fallback $fallback)
     if ($mailboxes.Count) {
         New-Blocker 'Shared mailbox forwarding' "Is the forwarding address of $($mailboxes.Count) shared mailbox(es). Change their forwarding." 'Shared mailbox forwarding' `
             -Items ($mailboxes | ForEach-Object { Format-Recipient $_ })
@@ -401,6 +411,7 @@ function Get-DLUpgradeReadiness {
     $group = Get-DistributionGroup -Identity $recipient.Guid.ToString() -ErrorAction Stop
     $dn = $group.DistinguishedName
     $ids = @($group.Guid.ToString(), "$($group.Name)", "$($group.DisplayName)", "$($group.PrimarySmtpAddress)") | Where-Object { $_ }
+    $smtp = @($group.EmailAddresses | Where-Object { "$_" -match '^smtp:' } | ForEach-Object { "$_" -replace '^smtp:' })
 
     $results = [System.Collections.Generic.List[object]]::new()
     $results.Add($typeResult)
@@ -410,7 +421,7 @@ function Get-DLUpgradeReadiness {
         'Owner types'                       = { Test-OwnerType -ManagedBy @($group.ManagedBy | ForEach-Object { "$_" }) }
         'Members'                           = { Test-Membership -Members @(Get-DistributionGroupMember -Identity $group.Guid.ToString() -ResultSize Unlimited -ErrorAction Stop) }
         'Nested: member of other groups'    = { Test-ParentGroup -DistinguishedName $dn -TargetIds $ids }
-        'Shared mailbox forwarding'         = { Test-SharedMailboxForwarding -DistinguishedName $dn -TargetIds $ids }
+        'Shared mailbox forwarding'         = { Test-SharedMailboxForwarding -DistinguishedName $dn -TargetIds $ids -SmtpAddresses $smtp }
         'Sender restriction in other DLs'   = { Test-SenderRestriction -DistinguishedName $dn -Guid $group.Guid -TargetIds $ids }
         'Alias characters'                  = { Test-AliasCharacter -Alias $group.Alias }
         'Tenant: group email address policy' = { Test-GroupEmailAddressPolicy }

@@ -212,6 +212,24 @@ Describe 'Test-SharedMailboxForwarding' {
         Mock Get-Mailbox { }
         (Test-SharedMailboxForwarding -DistinguishedName $script:Dn).Status | Should -Be 'Pass'
     }
+    It 'also filters on ForwardingSmtpAddress for each SMTP address' {
+        Mock Get-Mailbox { }
+        Test-SharedMailboxForwarding -DistinguishedName $script:Dn -SmtpAddresses 'sales@contoso.com', 'sales@fabrikam.com' | Out-Null
+        Should -Invoke Get-Mailbox -ParameterFilter {
+            $Filter -like "*ForwardingSmtpAddress -eq 'sales@contoso.com'*" -and $Filter -like "*ForwardingSmtpAddress -eq 'sales@fabrikam.com'*"
+        }
+    }
+    It 'matches ForwardingSmtpAddress in the fallback scan' {
+        Mock Get-Mailbox { throw "'ForwardingSmtpAddress' is not a recognized filterable property." } -ParameterFilter { $Filter }
+        Mock Get-Mailbox { @(
+            [pscustomobject]@{ DisplayName = 'Help Desk'; PrimarySmtpAddress = 'help@contoso.com'; ForwardingAddress = $null; ForwardingSmtpAddress = 'smtp:Sales@Contoso.com' }
+            [pscustomobject]@{ DisplayName = 'Other'; PrimarySmtpAddress = 'other@contoso.com'; ForwardingAddress = $null; ForwardingSmtpAddress = 'smtp:sales-eu@contoso.com' }
+        ) } -ParameterFilter { -not $Filter }
+        $r = Test-SharedMailboxForwarding -DistinguishedName $script:Dn -SmtpAddresses 'sales@contoso.com' -WarningAction SilentlyContinue
+        $r.Status | Should -Be 'Blocked'
+        $r.Items | Should -HaveCount 1
+        $r.Items[0] | Should -Match 'Help Desk'
+    }
 }
 
 Describe 'Test-SenderRestriction' {
@@ -401,6 +419,7 @@ Describe 'Get-DLUpgradeReadiness' {
         Mock Get-DistributionGroup {
             [pscustomobject]@{
                 Guid = $script:Guid; Name = 'Sales'; DisplayName = 'Sales'; PrimarySmtpAddress = 'sales@contoso.com'; Alias = 'sales'
+                EmailAddresses = @('SMTP:sales@contoso.com', 'smtp:sales@contoso.onmicrosoft.com', 'X500:/o=ExchangeLabs/cn=Recipients/cn=sales')
                 DistinguishedName = $script:Dn; IsDirSynced = $false; ManagedBy = @('alice')
             }
         } -ParameterFilter { $Identity }
@@ -424,6 +443,12 @@ Describe 'Get-DLUpgradeReadiness' {
         $r | Should -HaveCount 1
         $r.Status | Should -Be 'Blocked'
         Should -Invoke Get-DistributionGroupMember -Times 0 -Scope It
+    }
+    It 'checks forwarding to every SMTP address of the group' {
+        Get-DLUpgradeReadiness -Identity 'sales' | Out-Null
+        Should -Invoke Get-Mailbox -ParameterFilter {
+            $Filter -like "*ForwardingSmtpAddress -eq 'sales@contoso.onmicrosoft.com'*" -and $Filter -notlike '*X500*'
+        }
     }
     It 'keeps running other checks when one check errors' {
         Mock Get-Mailbox { throw 'transient failure' }

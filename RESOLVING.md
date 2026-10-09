@@ -323,13 +323,15 @@ directly.
 ## Shared mailbox forwarding
 
 **Why:** One or more shared mailboxes (listed in the script's output) forward
-their mail to this list.
+their mail to this list, through either `ForwardingAddress` or
+`ForwardingSmtpAddress`.
 
 **Fix:** Record each mailbox's forwarding settings, then clear forwarding.
+Clearing both settings is harmless if only one was set.
 
 ```powershell
-Get-Mailbox -Identity '<shared mailbox>' | Format-List ForwardingAddress, DeliverToMailboxAndForward
-Set-Mailbox -Identity '<shared mailbox>' -ForwardingAddress $null
+Get-Mailbox -Identity '<shared mailbox>' | Format-List ForwardingAddress, ForwardingSmtpAddress, DeliverToMailboxAndForward
+Set-Mailbox -Identity '<shared mailbox>' -ForwardingAddress $null -ForwardingSmtpAddress $null
 ```
 
 After the upgrade, set forwarding again if it's still needed:
